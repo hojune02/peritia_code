@@ -18,7 +18,8 @@
     "test:ai": "node --env-file-if-exists=.env scripts/evaluate-ai.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate-postgres.mjs",
-    "staging:grant": "node --env-file-if-exists=.env scripts/grant-staging-credits.mjs"
+    "staging:grant": "node --env-file-if-exists=.env scripts/grant-staging-credits.mjs",
+    "ai:costs": "node --env-file-if-exists=.env scripts/report-ai-costs.mjs"
   },
   "dependencies": {
     "bullmq": "^6.3.4",

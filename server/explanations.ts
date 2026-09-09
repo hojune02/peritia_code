@@ -5,6 +5,7 @@ import { PAGE_LINES, type Explanation } from "../lib/explanation";
 import { parseRepo, RepoError } from "../lib/repository";
 import { validateExplanation } from "./ai";
 import type { Config } from "./config";
+import { estimateGeminiCost, GeminiGenerationError, generateWithGemini, type GeminiUsage } from "./gemini";
 import { readSource } from "./github";
 
 export type ExplanationStatus = "queued" | "running" | "completed" | "failed";
@@ -130,7 +131,7 @@ async function prepare(config: Config, input: ExplanationSubmission): Promise<Pr
     contentHash: sourceHash,
     contextHash: sha256(""),
     level: input.level,
-    modelDigest: process.env.OLLAMA_MODEL_DIGEST || config.model,
+    modelDigest: config.aiModelRevision,
     promptVersion: process.env.AI_PROMPT_VERSION || "explanation-v1",
     options,
   });
@@ -203,11 +204,12 @@ export class ExplanationService {
       const bucket = await client.query(
         `SELECT id FROM usage_buckets
          WHERE user_id = $1 AND starts_at <= NOW()
+           AND ($2::boolean OR period_key = 'trial')
            AND (expires_at IS NULL OR expires_at > NOW())
            AND reserved + consumed < allowance
          ORDER BY expires_at ASC NULLS LAST, starts_at ASC
          LIMIT 1 FOR UPDATE`,
-        [userId],
+        [userId, this.config.billingEnabled],
       );
       if (!bucket.rows[0]) throw new RepoError("Your explanation allowance is exhausted.", 402, "QUOTA_EXHAUSTED");
       await client.query(`UPDATE usage_buckets SET reserved = reserved + 1 WHERE id = $1`, [bucket.rows[0].id]);
@@ -259,11 +261,19 @@ export class ExplanationService {
               COALESCE(SUM(reserved),0)::int reserved,
               BOOL_OR(period_key <> 'trial') paid
        FROM usage_buckets WHERE user_id = $1 AND starts_at <= NOW()
+         AND ($2::boolean OR period_key = 'trial')
          AND (expires_at IS NULL OR expires_at > NOW())`,
-      [userId],
+      [userId, this.config.billingEnabled],
     );
     const row = result.rows[0];
-    return { plan: row.paid ? "paid" : "free", allowance: row.allowance, consumed: row.consumed, reserved: row.reserved, remaining: row.allowance - row.consumed - row.reserved };
+    return {
+      plan: row.paid ? "paid" : "free",
+      allowance: row.allowance,
+      consumed: row.consumed,
+      reserved: row.reserved,
+      remaining: row.allowance - row.consumed - row.reserved,
+      billingEnabled: this.config.billingEnabled,
+    };
   }
 
   async ready() { await this.pool.query("SELECT 1"); }
@@ -288,6 +298,92 @@ function prompt(prepared: Prepared) {
   };
 }
 
+async function recordGeneration(
+  pool: Pool,
+  input: {
+    jobId: string;
+    attempt: number;
+    config: Config;
+    latencyMs: number;
+    modelVersion?: string;
+    usage?: GeminiUsage;
+    errorCode?: string;
+  },
+) {
+  const listCost = input.usage && input.config.aiProvider === "gemini"
+    ? estimateGeminiCost(input.usage)
+    : 0;
+  const billedCost = input.config.aiProvider === "gemini" && input.config.geminiBillingTier === "paid"
+    ? listCost
+    : 0;
+  await pool.query(
+    `INSERT INTO ai_generation_usage
+       (id,job_id,attempt,provider,model,model_version,billing_tier,input_tokens,
+        output_tokens,thought_tokens,total_tokens,latency_ms,estimated_list_cost_usd,
+        estimated_billed_cost_usd,error_code)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     ON CONFLICT(job_id,attempt) DO NOTHING`,
+    [
+      randomUUID(), input.jobId, input.attempt, input.config.aiProvider,
+      input.config.model, input.modelVersion || null,
+      input.config.aiProvider === "gemini" ? input.config.geminiBillingTier : "local",
+      input.usage?.inputTokens ?? null, input.usage?.outputTokens ?? null,
+      input.usage?.thoughtTokens ?? null, input.usage?.totalTokens ?? null,
+      input.latencyMs, listCost, billedCost, input.errorCode || null,
+    ],
+  );
+}
+
+async function generateWithOllama(
+  config: Config,
+  messages: ReturnType<typeof prompt>,
+  onText: (text: string) => Promise<void>,
+) {
+  const response = await fetch(`${config.ollamaUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 120_000)),
+    body: JSON.stringify({
+      model: config.model,
+      stream: true,
+      keep_alive: -1,
+      format: "json",
+      messages: [{ role: "system", content: messages.system }, { role: "user", content: messages.user }],
+      options: { temperature: 0, num_ctx: Number(process.env.AI_CONTEXT_TOKENS ?? 8192), num_predict: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 600) },
+    }),
+  });
+  if (!response.ok || !response.body) throw new Error("OLLAMA_REQUEST_FAILED");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", text = "", doneRecord = false;
+  const usage: GeminiUsage = { inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 };
+  const accept = async (line: string) => {
+    if (!line.trim()) return;
+    const record = JSON.parse(line);
+    if (record.error) throw new Error("OLLAMA_PROVIDER_ERROR");
+    if (typeof record.message?.content === "string") text += record.message.content;
+    if (record.done === true) {
+      doneRecord = true;
+      usage.inputTokens = Number(record.prompt_eval_count || 0);
+      usage.outputTokens = Number(record.eval_count || 0);
+      usage.totalTokens = usage.inputTokens + usage.outputTokens;
+    }
+    if (text.length > 100_000) throw new Error("OLLAMA_RESPONSE_TOO_LARGE");
+    await onText(text);
+  };
+  for (;;) {
+    const chunk = await reader.read();
+    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) await accept(line);
+    if (chunk.done) break;
+  }
+  if (buffer.trim()) await accept(buffer);
+  if (!doneRecord) throw new Error("OLLAMA_STREAM_INCOMPLETE");
+  return { text, modelVersion: config.model, usage };
+}
+
 export async function processExplanation(pool: Pool, config: Config, jobId: string) {
   const claimed = await pool.query(
     `UPDATE explanation_jobs SET status='running', attempt=attempt+1, partial_text='', started_at=COALESCE(started_at,NOW()), heartbeat_at=NOW()
@@ -296,52 +392,36 @@ export async function processExplanation(pool: Pool, config: Config, jobId: stri
   );
   const row = claimed.rows[0];
   if (!row || row.status === "completed") return;
+  const generationStarted = Date.now();
+  let generationRecorded = false;
+  let providerStarted = false;
   try {
     const prepared = await prepare(config, row.request_json);
     const messages = prompt(prepared);
-    const response = await fetch(`${config.ollamaUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 120_000)),
-      body: JSON.stringify({
-        model: config.model,
-        stream: true,
-        keep_alive: -1,
-        format: "json",
-        messages: [{ role: "system", content: messages.system }, { role: "user", content: messages.user }],
-        options: { temperature: 0, num_ctx: Number(process.env.AI_CONTEXT_TOKENS ?? 8192), num_predict: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 600) },
-      }),
-    });
-    if (!response.ok || !response.body) throw new Error("OLLAMA_REQUEST_FAILED");
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", text = "", doneRecord = false, lastSave = 0;
-    const accept = async (line: string) => {
-      if (!line.trim()) return;
-      const record = JSON.parse(line);
-      if (record.error) throw new Error("OLLAMA_PROVIDER_ERROR");
-      if (typeof record.message?.content === "string") text += record.message.content;
-      if (record.done === true) doneRecord = true;
+    let lastSave = 0;
+    const saveProgress = async (text: string) => {
       if (Date.now() - lastSave >= 500) {
-        if (text.length > 100_000) throw new Error("OLLAMA_RESPONSE_TOO_LARGE");
         await pool.query(`UPDATE explanation_jobs SET partial_text=$2, heartbeat_at=NOW() WHERE id=$1 AND status='running'`, [jobId, text]);
         lastSave = Date.now();
       }
     };
-    for (;;) {
-      const chunk = await reader.read();
-      buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) await accept(line);
-      if (chunk.done) break;
-    }
-    if (buffer.trim()) await accept(buffer);
-    if (!doneRecord) throw new Error("OLLAMA_STREAM_INCOMPLETE");
-    const checked = validateExplanation(JSON.parse(text), prepared.lines, prepared.first, prepared.last);
+    providerStarted = true;
+    const generation = config.aiProvider === "gemini"
+      ? await generateWithGemini(config, messages, saveProgress)
+      : await generateWithOllama(config, messages, saveProgress);
+    await recordGeneration(pool, {
+      jobId,
+      attempt: row.attempt,
+      config,
+      latencyMs: Date.now() - generationStarted,
+      modelVersion: generation.modelVersion,
+      usage: generation.usage,
+    });
+    generationRecorded = true;
+    const checked = validateExplanation(JSON.parse(generation.text), prepared.lines, prepared.first, prepared.last);
     const result: Explanation = {
       status: "generated", ...checked, unverified: false,
-      path: prepared.request.path, commit: prepared.request.commit, model: config.model,
+      path: prepared.request.path, commit: prepared.request.commit, model: generation.modelVersion,
       sourceHash: prepared.sourceHash, startLine: prepared.first, endLine: prepared.last,
       totalLines: prepared.lines.length, cached: false,
     };
@@ -349,11 +429,22 @@ export async function processExplanation(pool: Pool, config: Config, jobId: stri
     try {
       await client.query("BEGIN");
       await client.query(`INSERT INTO ai_cache(cache_key,result_json) VALUES($1,$2) ON CONFLICT(cache_key) DO NOTHING`, [row.cache_key, result]);
-      await client.query(`UPDATE explanation_jobs SET status='completed', partial_text=$2, result_json=$3, finished_at=NOW(), heartbeat_at=NOW() WHERE id=$1 AND status='running'`, [jobId, text, result]);
+      await client.query(`UPDATE explanation_jobs SET status='completed', partial_text=$2, result_json=$3, finished_at=NOW(), heartbeat_at=NOW() WHERE id=$1 AND status='running'`, [jobId, generation.text, result]);
       await settle(client, jobId, row.user_id, row.cache_key, result);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   } catch (error) {
+    if (providerStarted && !generationRecorded) {
+      await recordGeneration(pool, {
+        jobId,
+        attempt: row.attempt,
+        config,
+        latencyMs: Date.now() - generationStarted,
+        modelVersion: error instanceof GeminiGenerationError ? error.modelVersion : undefined,
+        usage: error instanceof GeminiGenerationError ? error.usage : undefined,
+        errorCode: error instanceof Error ? error.message : "GENERATION_FAILED",
+      }).catch((metricsError) => console.error("AI usage recording failed:", metricsError));
+    }
     await pool.query(`UPDATE explanation_jobs SET status='queued', error_code=$2, heartbeat_at=NOW() WHERE id=$1 AND status='running'`, [jobId, error instanceof Error ? error.message : "GENERATION_FAILED"]);
     throw error;
   }

@@ -1,8 +1,8 @@
-# Peritia — durable local-AI explanations
+# Peritia — durable AI source explanations
 
-A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Explanation jobs, quotas, cache access, and billing state are durable in PostgreSQL; Redis/BullMQ connects a public API to a separately deployed Ollama worker.
+A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Explanation jobs, quotas, cache access, provider usage, and billing state are durable in PostgreSQL; Redis/BullMQ connects the public API to a separate AI worker. Production uses Gemini 2.5 Flash-Lite; Ollama remains available for local development.
 
-Production setup, billing checks, GPU benchmarking, load testing, and GitHub App migration are documented in [OPERATIONS.md](./OPERATIONS.md).
+The zero-cost Oracle beta setup, usage reporting, load testing, and release checks are documented in [OPERATIONS.md](./OPERATIONS.md).
 
 ## Start here
 
@@ -22,9 +22,9 @@ Open **http://localhost:5173**. Keep the terminal running. Vite serves the inter
 
 Click **Sign in → Create an account**. Use an email address and a password of at least 12 characters. Google and AI configuration are independent: password login works before either is configured.
 
-## Free AI setup
+## Optional local Ollama setup
 
-There is **no paid AI API, API key, subscription, or cloud fallback** in this application. The model runs on your own hardware. Electricity, hardware, bandwidth, domain names, and hosted servers can still cost money; this is not unlimited free cloud inference.
+Local development defaults to Ollama, so development does not require sending source to an API. Production Compose explicitly uses Gemini instead.
 
 1. Install Ollama from https://ollama.com/download.
 2. Disable its cloud features. In Ollama's `~/.ollama/server.json`, merge `"disable_ollama_cloud": true` into the JSON object, then restart Ollama. Alternatively, set `OLLAMA_NO_CLOUD=1` in the environment of the **Ollama server process**, not just Peritia.
@@ -37,7 +37,7 @@ ollama pull qwen2.5-coder:7b
 4. Keep Ollama running. If the desktop app/service is not already running, use `ollama serve` in another terminal. Verify it with `ollama list`.
 5. Sign in to Peritia, open **File explorer**, select a readable file, and explicitly request an explanation. You can browse or close the tab while the worker continues; reopening reconnects to the durable job. Expand **Inspect evidence** to compare each claim with exact source lines.
 
-The default model download is about 4.7 GB; it also needs memory for the model and a 16K context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is a separate step and is not bundled into this ZIP. GPU setup depends on your hardware; the Docker example below uses CPU by default.
+The default local model download is about 4.7 GB; it also needs memory for the model and its context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is separate and is not bundled with the application.
 
 ### How accuracy is handled
 
@@ -95,13 +95,19 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | DATABASE_URL                            | PostgreSQL connection used by the API, worker, migrations, and durable caches.                                                  |
 | REDIS_URL                               | Redis connection used by the explanation outbox dispatcher and worker.                                                         |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
+| AI_PROVIDER                             | `ollama` for local development or `gemini` for the production worker.                                                                  |
+| GEMINI_API_KEY                          | Server-only Gemini credential. Required when `AI_PROVIDER=gemini`.                                                                     |
+| GEMINI_MODEL                            | Production model; defaults to `gemini-2.5-flash-lite`.                                                                                  |
+| GEMINI_BILLING_TIER                     | `free` records zero billed cost; `paid` records estimated list-price cost as billed cost.                                               |
+| AI_MODEL_REVISION                       | Deployment-controlled cache revision. Change it when model or provider behavior changes.                                                |
+| BILLING_ENABLED                         | Defaults to `false`. Billing routes and processing do not start unless explicitly enabled.                                              |
 | OLLAMA_URL                              | Defaults to `http://127.0.0.1:11434`. Local hosts or private Docker hostname `ollama` only.                                     |
 | OLLAMA_MODEL                            | Defaults to `qwen2.5-coder:7b`; must be installed locally. Cloud model names are rejected.                                      |
 | PORT                                    | Express port, default 3001. Development script uses 3001 to match the Vite proxy.                                               |
 | NODE_ENV                                | `production` requires HTTPS. Leave unset for local compiled-app testing.                                                        |
 | DOMAIN                                  | Used by the production Docker Compose setup, e.g. `peritia.example.com`.                                                        |
 
-Never prefix secrets with `VITE_`, commit environment files, or put credentials in frontend code. GitHub requests remain unauthenticated; adding a `GITHUB_TOKEN` alone has no effect.
+Never prefix secrets with `VITE_`, commit environment files, or put credentials in frontend code. A GitHub token or GitHub App credential is optional for raising server-side API limits; private repository metadata is still rejected.
 
 ## Build and run the compiled app locally
 
@@ -115,29 +121,32 @@ npm start
 
 Open http://localhost:3001. For Google testing here, also authorize `http://localhost:3001/api/auth/google/callback`. Switch `APP_ORIGIN` back to port 5173 before resuming Vite development. `npm start` loads the local environment file but does not build automatically.
 
-## Deploy with persistent accounts and local inference
+## Deploy the zero-cost API beta
 
-The supplied Compose topology runs separate API and worker processes with durable PostgreSQL/Redis and a private Ollama service. For a paid beta, place the API/data services and GPU worker in compatible regions with private connectivity; see `OPERATIONS.md`.
+The supplied Compose topology runs separate API and worker processes with PostgreSQL/Redis, Caddy HTTPS, and Gemini. It has no Ollama container and requests no GPU, so it is suitable for an Oracle Always Free ARM VM.
 
 1. Upload this `peritia/` folder to your machine. Keep secrets outside Git and use a restrictive file permission for the environment file.
 2. Run the local setup once, or copy `.env.example` to `.env` and generate a random JWT secret using the command documented there.
-3. Set `DOMAIN`, `POSTGRES_PASSWORD`, and the required secrets in `.env`. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
-4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001 or 11434 to the public internet.
-5. Start Ollama and download the model:
+3. Set `DOMAIN`, `POSTGRES_PASSWORD`, `GEMINI_API_KEY`, and `AI_MODEL_REVISION` in `.env`. Keep `GEMINI_BILLING_TIER=free` and `BILLING_ENABLED=false`. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
+4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001, 5432, or 6379.
+5. Start the stack:
 
 ```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull qwen2.5-coder:7b
 docker compose up -d --build
 docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
-7. Test sign-in and AI using **TESTING.md**. Model inference stays on the private Compose network; Ollama cloud features are disabled. No inference port is published.
+7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. With billing disabled, historical paid buckets are ignored and checkout/webhook/portal routes are not mounted.
+8. Review real provider usage and estimated cost:
 
-The Compose images use updateable Node 24, Caddy 2, and Ollama tags. Pin image digests after validating your deployment if you need exact image reproducibility; npm packages already have a lockfile. Docker execution and live HTTPS deployment were not tested in the authoring environment.
+```bash
+docker compose exec api npm run ai:costs
+```
 
-Keep the `postgres`, `redis`, and `models` named volumes: **do not run `docker compose down -v`** unless you intend to delete application data. Use PostgreSQL-native backups and test restoration before launch.
+The report records each generation attempt, including failures, latency, provider model version, input/output/thought tokens, list-price estimate, and billed estimate. Update the configured token prices if Google changes its rates.
+
+Keep the `postgres` and `redis` named volumes: **do not run `docker compose down -v`** unless you intend to delete application data. Use PostgreSQL-native backups and test restoration before launch.
 
 ## Files to explore
 
@@ -147,7 +156,7 @@ Keep the `postgres`, `redis`, and `models` named volumes: **do not run `docker c
 | components/account.tsx, app/features.css | Login dialog and account UI                                               |
 | components/ai-explanation.tsx            | Section selection, generation state, citations, stale-response protection |
 | server/auth.ts, server/store.ts          | Passwords, JWTs, Google OAuth, persistence                                |
-| server/ai.ts                             | Local model request, prompt, context limits, evidence checks, cache       |
+| server/ai.ts, server/gemini.ts           | Evidence validation, Gemini streaming, token and cost accounting          |
 | server/config.ts, server/app.ts          | Configuration validation and API routes                                   |
 | server/github.ts, lib/repository.ts      | Public GitHub ingestion and static analysis                               |
 | tests/features.test.ts                   | HTTP/auth and AI contract tests                                           |
@@ -156,9 +165,9 @@ Keep the `postgres`, `redis`, and `models` named volumes: **do not run `docker c
 
 ## Verified and remaining checks
 
-The core suite covers real HTTP authentication plus mocked provider/model boundaries. `npm run test:integration` adds a real PostgreSQL concurrency check for quota reservation. Live Google, Ollama, Lemon Squeezy, GPU, and public deployment checks require external credentials and infrastructure and must pass the staging runbook before launch.
+The core suite covers real HTTP authentication plus mocked provider/model boundaries. `npm run test:integration` adds real PostgreSQL concurrency and settlement checks. Live Google, Gemini, and public deployment checks require external credentials and must pass the staging runbook before launch.
 
-No live Google account login, real Ollama generation, browser interaction, Docker build, or public deployment has been verified here. Those require your Google OAuth credentials, installed model/hardware, and deployment environment. Run the documented manual checks before inviting users.
+No live Google account login, real Gemini generation, browser interaction, or public deployment has been verified here. Those require your credentials and deployment environment. Run the documented manual checks before inviting users.
 
 ## Other MVP limits
 
@@ -166,6 +175,8 @@ Public repos only; up to 2,500 visible files, 16 initial source reads, and 64 KB
 
 ## Official references
 
+- Gemini streaming and usage metadata: https://ai.google.dev/gemini-api/docs/generate-content/text-generation and https://ai.google.dev/api/generate-content
+- Gemini pricing: https://ai.google.dev/gemini-api/docs/pricing
 - Google OAuth setup and token validation: https://developers.google.com/identity/openid-connect/openid-connect
 - Ollama API and structured outputs: https://docs.ollama.com/api/chat and https://docs.ollama.com/capabilities/structured-outputs
 - Ollama local-only mode: https://docs.ollama.com/faq

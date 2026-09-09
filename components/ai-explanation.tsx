@@ -21,12 +21,12 @@ export function AIExplanation({
   return (
     <section className="ai-panel" aria-label="AI file explanation">
       <span className="mini-label">
-        <Sparkles size={15} /> LOCAL AI · NO API FEES
+        <Sparkles size={15} /> AI SOURCE EXPLANATION
       </span>
       <h3>Understand the code</h3>
       <p className="metadata-note">
-        The selected section goes to the server owner's local Ollama model.
-        Source excerpts are checked; the explanation can still be mistaken.
+        The selected public source section is sent to the configured AI provider.
+        Source citations are checked; the explanation can still be mistaken.
       </p>
       {total > PAGE_LINES && (
         <label className="ai-range">
@@ -74,7 +74,7 @@ export function AIExplanation({
 }
 
 function UsageControl() {
-  const [usage, setUsage] = useState<{ plan: string; remaining: number } | null>(null);
+  const [usage, setUsage] = useState<{ plan: string; remaining: number; billingEnabled: boolean } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     void fetch("/api/usage")
@@ -101,11 +101,11 @@ function UsageControl() {
   return (
     <div className="ai-range">
       <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanations remaining` : "Loading allowance…"}</span>
-      {usage?.plan === "paid" ? (
+      {usage?.billingEnabled && usage.plan === "paid" ? (
         <button className="small-link" onClick={() => void openBilling("portal")}>Manage subscription</button>
-      ) : (
+      ) : usage?.billingEnabled ? (
         <button className="small-link" onClick={() => void openBilling("checkout")}>Upgrade</button>
-      )}
+      ) : null}
       {error && <span role="alert">{error}</span>}
     </div>
   );
@@ -218,7 +218,7 @@ function Generated({
           <Loader2 size={18} className="spin" />
           {progress
             ? "Generating… progress is saved if you leave this tab."
-            : "Queued for the local model… You can keep browsing."}
+            : "Queued for the AI model… You can keep browsing."}
         </p>
       )}
       {busy && progress && (
@@ -252,7 +252,7 @@ function Generated({
           </p>
           {data.unverified && data.rawText && (
             <div className="ai-raw-response">
-              <strong>Unverified local AI response</strong>
+              <strong>Unverified AI response</strong>
 
               <p>
                 The model answered, but its citation metadata did not pass

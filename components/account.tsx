@@ -118,7 +118,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
               {register ? "Create your Peritia account" : "Welcome to Peritia"}
             </DialogTitle>
             <DialogDescription>
-              Sign in for explanations from your local AI model.
+              Sign in for AI-assisted source explanations.
             </DialogDescription>
           </DialogHeader>
           <form className="account-form" onSubmit={submit}>

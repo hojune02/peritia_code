@@ -14,11 +14,18 @@ x-api-environment: &api-environment
   GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
   GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
   GITHUB_CACHE_MODE: postgres
-  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
-  OLLAMA_MODEL_DIGEST: ${OLLAMA_MODEL_DIGEST:?Set the immutable model digest}
+  AI_PROVIDER: gemini
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+  GEMINI_BILLING_TIER: ${GEMINI_BILLING_TIER:-free}
+  GEMINI_INPUT_USD_PER_MILLION: ${GEMINI_INPUT_USD_PER_MILLION:-0.10}
+  GEMINI_OUTPUT_USD_PER_MILLION: ${GEMINI_OUTPUT_USD_PER_MILLION:-0.40}
+  AI_MODEL_REVISION: ${AI_MODEL_REVISION:?Set an explicit cache revision}
   AI_PROMPT_VERSION: ${AI_PROMPT_VERSION:-explanation-v1}
   AI_CONTEXT_TOKENS: ${AI_CONTEXT_TOKENS:-8192}
   AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-600}
+  AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-120000}
+  BILLING_ENABLED: ${BILLING_ENABLED:-false}
   LEMONSQUEEZY_API_KEY: ${LEMONSQUEEZY_API_KEY:-}
   LEMONSQUEEZY_STORE_ID: ${LEMONSQUEEZY_STORE_ID:-}
   LEMONSQUEEZY_VARIANT_ID: ${LEMONSQUEEZY_VARIANT_ID:-}
@@ -51,9 +58,13 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Run npm run setup first}
       DATABASE_URL: postgresql://peritia:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/peritia
       REDIS_URL: redis://redis:6379
-      OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
-      OLLAMA_MODEL_DIGEST: ${OLLAMA_MODEL_DIGEST:?Set the immutable model digest}
+      AI_PROVIDER: gemini
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      GEMINI_BILLING_TIER: ${GEMINI_BILLING_TIER:-free}
+      GEMINI_INPUT_USD_PER_MILLION: ${GEMINI_INPUT_USD_PER_MILLION:-0.10}
+      GEMINI_OUTPUT_USD_PER_MILLION: ${GEMINI_OUTPUT_USD_PER_MILLION:-0.40}
+      AI_MODEL_REVISION: ${AI_MODEL_REVISION:?Set an explicit cache revision}
       AI_PROMPT_VERSION: ${AI_PROMPT_VERSION:-explanation-v1}
       AI_CONTEXT_TOKENS: ${AI_CONTEXT_TOKENS:-8192}
       AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-600}
@@ -61,7 +72,6 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      ollama: { condition: service_started }
   postgres:
     image: postgres:17
     restart: unless-stopped
@@ -85,22 +95,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    environment:
-      OLLAMA_NO_CLOUD: "1"
-      OLLAMA_KEEP_ALIVE: "-1"
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_NUM_PARALLEL: "1"
-    volumes: [models:/root/.ollama]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
   proxy:
     image: caddy:2
     restart: unless-stopped
@@ -116,6 +110,5 @@ services:
 volumes:
   postgres:
   redis:
-  models:
   certificates:
   caddy_config:

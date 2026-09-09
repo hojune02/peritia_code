@@ -12,8 +12,10 @@ import { createQueue, startOutboxDispatcher } from "./queue";
 const config = getConfig();
 const store = new PostgresStore();
 const explanations = new ExplanationService(db, config);
-const billing = new BillingService(db, billingOptions());
-const stopBillingProcessor = billing.startProcessor();
+const billing = config.billingEnabled
+  ? new BillingService(db, billingOptions())
+  : undefined;
+const stopBillingProcessor = billing?.startProcessor() || (() => undefined);
 const queueResources = createQueue();
 const stopDispatcher = startOutboxDispatcher(db, queueResources.queue);
 const ready = async () => {

@@ -31,7 +31,7 @@ export function createApp(
       res.setHeader("Strict-Transport-Security", "max-age=31536000");
     next();
   });
-  if (dependencies.billing) {
+  if (config.billingEnabled && dependencies.billing) {
     app.post(
       "/api/billing/webhook",
       express.raw({ type: "application/json", limit: "256kb" }),
@@ -45,7 +45,7 @@ export function createApp(
   const explain = dependencies.explain || createExplainer(config);
   // The synchronous endpoint is a development/test compatibility path. A
   // production API must never run model inference in its request process.
-  if (!config.production || dependencies.explain) {
+  if ((!config.production && config.aiProvider === "ollama") || dependencies.explain) {
     app.post(
       "/api/explain",
       auth.required,
@@ -122,7 +122,7 @@ export function createApp(
       res.json(await jobs.usage(res.locals.user.id));
     });
   }
-  if (dependencies.billing) {
+  if (config.billingEnabled && dependencies.billing) {
     app.post("/api/billing/checkout", auth.required, async (_req, res) => {
       res.json(await dependencies.billing!.checkout(res.locals.user));
     });
@@ -135,7 +135,9 @@ export function createApp(
     res.json({
       status: "ok",
       analysis: "static-evidence",
-      ai: "local-ollama",
+      ai: config.aiProvider,
+      model: config.model,
+      billing: config.billingEnabled ? "enabled" : "disabled",
       framework: "express",
     }),
   );

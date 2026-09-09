@@ -19,6 +19,7 @@ import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
 import { makeCacheKey } from "../server/explanations";
 import { verifyWebhook } from "../server/billing";
+import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
 
 const config = getConfig({
@@ -70,6 +71,67 @@ test("billing webhook verification rejects malformed and altered signatures", ()
   assert.equal(verifyWebhook(body, signature, secret), true);
   assert.equal(verifyWebhook(Buffer.from(body + "x"), signature, secret), false);
   assert.equal(verifyWebhook(body, "not-hex", secret), false);
+});
+
+test("Gemini streaming preserves partial output and reports provider usage", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+    GEMINI_MODEL: "gemini-2.5-flash-lite",
+    AI_MODEL_REVISION: "test-revision",
+  });
+  const events = [
+    { candidates: [{ content: { parts: [{ text: '{"claims":[],' }] } }] },
+    {
+      candidates: [{ content: { parts: [{ text: '"limitations":[]}' }] }, finishReason: "STOP" }],
+      modelVersion: "gemini-2.5-flash-lite-001",
+      usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 400, thoughtsTokenCount: 25, totalTokenCount: 2425 },
+    },
+  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+  const partial: string[] = [];
+  const generated = await generateWithGemini(
+    geminiConfig,
+    { system: "system", user: "user" },
+    async (text) => { partial.push(text); },
+    async (_url, init) => {
+      assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "test-api-key");
+      return new Response(events, { headers: { "Content-Type": "text/event-stream" } });
+    },
+  );
+  assert.equal(generated.text, '{"claims":[],"limitations":[]}');
+  assert.equal(generated.modelVersion, "gemini-2.5-flash-lite-001");
+  assert.deepEqual(generated.usage, { inputTokens: 2000, outputTokens: 400, thoughtTokens: 25, totalTokens: 2425 });
+  assert.deepEqual(partial, ['{"claims":[],', '{"claims":[],"limitations":[]}']);
+  assert.equal(estimateGeminiCost(generated.usage, {
+    GEMINI_INPUT_USD_PER_MILLION: "0.10",
+    GEMINI_OUTPUT_USD_PER_MILLION: "0.40",
+  }), 0.00037);
+});
+
+test("Gemini failures retain provider-reported token usage for cost accounting", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+  });
+  const event = `data: ${JSON.stringify({
+    candidates: [{ finishReason: "MAX_TOKENS" }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 },
+  })}\n\n`;
+  await assert.rejects(
+    generateWithGemini(
+      geminiConfig,
+      { system: "system", user: "user" },
+      async () => undefined,
+      async () => new Response(event),
+    ),
+    (error: unknown) => error instanceof GeminiGenerationError
+      && error.message === "GEMINI_FINISH_MAX_TOKENS"
+      && error.usage?.totalTokens === 150,
+  );
 });
 async function fixture(
   t: TestContext,
@@ -647,6 +709,8 @@ test("configuration refuses weak secrets, paid/cloud endpoints, and non-HTTPS pr
     { JWT_SECRET: "weak" },
     { OLLAMA_URL: "https://api.openai.com" },
     { OLLAMA_MODEL: "model:cloud" },
+    { AI_PROVIDER: "gemini" },
+    { GEMINI_BILLING_TIER: "unknown" },
     { NODE_ENV: "production", APP_ORIGIN: "http://localhost:3001" },
   ])
     assert.throws(() =>
