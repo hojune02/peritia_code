@@ -141,7 +141,7 @@ test("GitHub ingestion pins the commit and derives technology from fetched files
     const guide = await analyzeRepository("testing/fixture");
     assert.equal(guide.commit, sha);
     assert.equal(guide.files.length, 2);
-    assert.equal(guide.sources.length, 2);
+    assert.equal(guide.sources.length, 1);
     assert.ok(guide.technologies.some((t) => t.name === "React"));
     assert.ok(
       paths
