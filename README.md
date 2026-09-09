@@ -1,6 +1,8 @@
-# Peritia 0.2 — accounts and local AI
+# Peritia — durable local-AI explanations
 
-A React/TypeScript + Express web service that turns a public GitHub repository into an interactive guide. This edition adds email/password accounts, Google sign-in, revocable JWT sessions, and file explanations from a locally running Ollama model.
+A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Explanation jobs, quotas, cache access, and billing state are durable in PostgreSQL; Redis/BullMQ connects a public API to a separately deployed Ollama worker.
+
+Production setup, billing checks, GPU benchmarking, load testing, and GitHub App migration are documented in [OPERATIONS.md](./OPERATIONS.md).
 
 ## Start here
 
@@ -9,8 +11,12 @@ Install Node.js **24 LTS** (Node 22.13+ is also supported). From this folder:
 ```bash
 npm ci
 npm run setup
+docker compose -f compose.dev.yaml up -d
+npm run db:migrate
 npm run dev
 ```
+
+In another terminal, run `npm run start:worker` after Redis and Ollama are available. Set the local `DATABASE_URL` and `REDIS_URL` values from `.env.example` first.
 
 Open **http://localhost:5173**. Keep the terminal running. Vite serves the interface on 5173 and proxies API requests to Express on 3001. The setup command creates a local environment file with a random JWT secret; it never overwrites an existing one. If upgrading an existing installation, compare your settings with `.env.example` and add the new variables.
 
@@ -29,7 +35,7 @@ ollama pull qwen2.5-coder:7b
 ```
 
 4. Keep Ollama running. If the desktop app/service is not already running, use `ollama serve` in another terminal. Verify it with `ollama list`.
-5. Sign in to Peritia, open **File explorer**, and select a readable file. Its **Understand** panel generates the explanation automatically. Expand **Inspect evidence** to compare each claim with exact source lines. The bundled example also works with AI.
+5. Sign in to Peritia, open **File explorer**, select a readable file, and explicitly request an explanation. You can browse or close the tab while the worker continues; reopening reconnects to the durable job. Expand **Inspect evidence** to compare each claim with exact source lines.
 
 The default model download is about 4.7 GB; it also needs memory for the model and a 16K context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is a separate step and is not bundled into this ZIP. GPU setup depends on your hardware; the Docker example below uses CPU by default.
 
@@ -40,7 +46,7 @@ The default model download is about 4.7 GB; it also needs memory for the model a
 - Structured output includes claims, observation/inference labels, source line ranges, exact excerpts, and limitations. Every quoted excerpt and range is checked against the selected source before rendering. Invalid output is rejected as a whole.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
 - **A valid citation does not prove the explanation is true.** A model can misinterpret correctly quoted code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
-- Responses are cached for 30 minutes in bounded server memory, keyed by repository, commit, file, source hash, section, detail level, and model. The cache is shared for public source only. There is one active generation per server and a 30-request/hour limit per account. Cache hits also count toward this limit.
+- Completed output is cached durably by immutable source, line range, detail level, prompt version, generation options, and model digest. Each new unlock reserves one atomic quota credit, including a shared cache hit; previously unlocked output remains accessible without another credit.
 
 The curated technology glossary and static file facts remain available when AI is unavailable. See **TESTING.md** for a real-model C/Python/React evaluation and a human accuracy rubric.
 
@@ -72,7 +78,7 @@ The backend uses authorization code exchange with PKCE, browser-bound expiring s
 
 ## JWT and account storage
 
-Passwords use salted scrypt hashes. Users, sessions, and short-lived OAuth transactions live in SQLite at `DATABASE_PATH`, defaulting to `data/peritia.sqlite`. Accounts survive app restarts if that directory persists.
+Passwords use salted scrypt hashes. Users, sessions, OAuth transactions, explanation jobs, quotas, and billing state live in PostgreSQL. Redis carries durable job IDs to the worker but is not the billing source of truth.
 
 JWTs expire after eight hours and travel in an HttpOnly, SameSite=Lax cookie; production also uses Secure and the `__Host-` prefix. No tokens are put in localStorage or exposed in JSON responses. Each authenticated request checks a server-side session record, so logout revokes that token immediately. After expiry, sign in again; there is no refresh-token flow.
 
@@ -86,7 +92,8 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | APP_ORIGIN                              | Exact browser origin. `http://localhost:5173` for development; HTTPS origin for production. No trailing slash.                  |
 | JWT_SECRET                              | Random secret of at least 32 bytes. `npm run setup` generates one. Keep stable across restarts; changing it signs everyone out. |
-| DATABASE_PATH                           | Persistent SQLite location. Back up the database.                                                                               |
+| DATABASE_URL                            | PostgreSQL connection used by the API, worker, migrations, and durable caches.                                                  |
+| REDIS_URL                               | Redis connection used by the explanation outbox dispatcher and worker.                                                         |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
 | OLLAMA_URL                              | Defaults to `http://127.0.0.1:11434`. Local hosts or private Docker hostname `ollama` only.                                     |
 | OLLAMA_MODEL                            | Defaults to `qwen2.5-coder:7b`; must be installed locally. Cloud model names are rejected.                                      |
@@ -110,11 +117,11 @@ Open http://localhost:3001. For Google testing here, also authorize `http://loca
 
 ## Deploy with persistent accounts and local inference
 
-Use a single Linux machine with Docker Engine + Compose, enough RAM for your model, persistent storage, and a domain whose DNS points to it. This can be your own machine or a server you rent. The previous stateless/free Render template was removed because it did not preserve SQLite accounts or provide local model inference.
+The supplied Compose topology runs separate API and worker processes with durable PostgreSQL/Redis and a private Ollama service. For a paid beta, place the API/data services and GPU worker in compatible regions with private connectivity; see `OPERATIONS.md`.
 
 1. Upload this `peritia/` folder to your machine. Keep secrets outside Git and use a restrictive file permission for the environment file.
 2. Run the local setup once, or copy `.env.example` to `.env` and generate a random JWT secret using the command documented there.
-3. Set `DOMAIN=peritia.your-domain.com` in `.env`. Set your Google credentials if wanted. Compose derives `APP_ORIGIN=https://DOMAIN` and uses `/data/peritia.sqlite` in a named volume.
+3. Set `DOMAIN`, `POSTGRES_PASSWORD`, and the required secrets in `.env`. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
 4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001 or 11434 to the public internet.
 5. Start Ollama and download the model:
 
@@ -122,7 +129,7 @@ Use a single Linux machine with Docker Engine + Compose, enough RAM for your mod
 docker compose up -d ollama
 docker compose exec ollama ollama pull qwen2.5-coder:7b
 docker compose up -d --build
-docker compose logs --tail=60 app proxy
+docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
@@ -130,7 +137,7 @@ docker compose logs --tail=60 app proxy
 
 The Compose images use updateable Node 24, Caddy 2, and Ollama tags. Pin image digests after validating your deployment if you need exact image reproducibility; npm packages already have a lockfile. Docker execution and live HTTPS deployment were not tested in the authoring environment.
 
-Keep the `accounts` named volume: **do not run `docker compose down -v`** unless you intend to delete accounts and model data. For a consistent backup, stop the app and back up the entire accounts volume, including any SQLite WAL files; restart afterward. Keep backups private. Do not run several replicas against this SQLite file. Growing beyond a single machine requires a shared database and distributed throttling.
+Keep the `postgres`, `redis`, and `models` named volumes: **do not run `docker compose down -v`** unless you intend to delete application data. Use PostgreSQL-native backups and test restoration before launch.
 
 ## Files to explore
 
@@ -149,7 +156,7 @@ Keep the `accounts` named volume: **do not run `docker compose down -v`** unless
 
 ## Verified and remaining checks
 
-In this workspace, dependency installation, all **29 automated tests**, TypeScript checking, and the client/server production build passed on Node 24.19.0. A compiled-server smoke test also passed for frontend delivery, account creation, sessions, logout, and offline-AI behavior. Auth tests use real HTTP endpoints, SQLite, password hashing, and JWTs. Google exchange/identity and AI responses are mocked in automated tests.
+The core suite covers real HTTP authentication plus mocked provider/model boundaries. `npm run test:integration` adds a real PostgreSQL concurrency check for quota reservation. Live Google, Ollama, Lemon Squeezy, GPU, and public deployment checks require external credentials and infrastructure and must pass the staging runbook before launch.
 
 No live Google account login, real Ollama generation, browser interaction, Docker build, or public deployment has been verified here. Those require your Google OAuth credentials, installed model/hardware, and deployment environment. Run the documented manual checks before inviting users.
 

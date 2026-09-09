@@ -1,5 +1,6 @@
 import { RepoError } from "../lib/repository";
 import { Buffer } from "node:buffer";
+import { githubCredential } from "./github-app";
 
 const githubOrigin = "https://api.github.com";
 const requestTimeoutMs = 15_000;
@@ -168,16 +169,17 @@ function buildUrl(
   return url;
 }
 
-function requestHeaders(
+async function requestHeaders(
   accept: string,
-): Record<string, string> {
+  credential?: string | null,
+): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     Accept: accept,
     "User-Agent": "Peritia",
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
-  const token = process.env.GITHUB_TOKEN?.trim();
+  const token = credential === undefined ? await githubCredential() : credential;
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -307,15 +309,13 @@ export async function githubJson<T>(
   const startedAt = Date.now();
 
   let response: Response;
+  const accept = options.accept ?? "application/vnd.github+json";
 
 try {
   response = await fetch(url, {
     method: "GET",
     redirect: "error",
-    headers: requestHeaders(
-      options.accept ??
-        "application/vnd.github+json",
-    ),
+    headers: await requestHeaders(accept),
     signal: AbortSignal.timeout(
       requestTimeoutMs,
     ),
@@ -328,6 +328,18 @@ try {
 }
 
   logGitHubRequest(response, startedAt, "json");
+  if (response.status === 404 && process.env.GITHUB_APP_ID) {
+    // A GitHub App token can only see repositories in its installation.
+    // Retry public-repository access with the PAT, or unauthenticated after
+    // the PAT is retired.
+    response = await fetch(url, {
+      method: "GET",
+      redirect: "error",
+      headers: await requestHeaders(accept, process.env.GITHUB_TOKEN?.trim() || null),
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+    logGitHubRequest(response, startedAt, "json");
+  }
   await assertSuccessful(response);
 
   return readJsonBody<T>(response);
@@ -340,16 +352,25 @@ export async function githubSource(
   const url = buildUrl(pathname, options.query);
   const startedAt = Date.now();
 
-  const response = await fetch(url, {
+  let response = await fetch(url, {
     method: "GET",
     redirect: "error",
-    headers: requestHeaders(
+    headers: await requestHeaders(
       "application/vnd.github.raw+json",
     ),
     signal: AbortSignal.timeout(requestTimeoutMs),
   });
 
   logGitHubRequest(response, startedAt, "source");
+  if (response.status === 404 && process.env.GITHUB_APP_ID) {
+    response = await fetch(url, {
+      method: "GET",
+      redirect: "error",
+      headers: await requestHeaders("application/vnd.github.raw+json", process.env.GITHUB_TOKEN?.trim() || null),
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+    logGitHubRequest(response, startedAt, "source");
+  }
   await assertSuccessful(response);
 
   const contentLength = numericHeader(
