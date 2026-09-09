@@ -1,0 +1,40 @@
+name: peritia-dev
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: peritia
+      POSTGRES_PASSWORD: peritia_local_only
+      POSTGRES_DB: peritia
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - peritia_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peritia -d peritia"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - peritia_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  peritia_postgres:
+  peritia_redis:
