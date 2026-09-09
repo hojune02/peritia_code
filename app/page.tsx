@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useRef,
   useState,
   type FormEvent,
@@ -63,7 +64,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { demoGuide } from "@/lib/demo";
-import { AccountControl } from "@/components/account";
+import { AccountControl, useAccount } from "@/components/account";
 import { AIExplanation } from "@/components/ai-explanation";
 import {
   describePath,
@@ -71,6 +72,7 @@ import {
   summarizeSource,
   type Guide,
   type RepoFile,
+  type SavedRepository,
   type Tech,
 } from "@/lib/repository";
 
@@ -108,12 +110,20 @@ function RepoNavigation({
   onSection,
   onImport,
   onAbout,
+  repositories,
+  repositoriesLoading,
+  signedIn,
+  onRepository,
 }: {
   guide: Guide;
   section: Section;
   onSection: (s: Section) => void;
   onImport: () => void;
   onAbout: () => void;
+  repositories: SavedRepository[];
+  repositoriesLoading: boolean;
+  signedIn: boolean;
+  onRepository: (repository: SavedRepository) => void;
 }) {
   const { setOpenMobile } = useSidebar();
   return (
@@ -141,6 +151,41 @@ function RepoNavigation({
           <button className="new-repo" onClick={onImport}>
             <Plus size={15} /> Import repository
           </button>
+        </div>
+        <div className="saved-repositories" aria-label="Saved repositories">
+          <span className="overline">YOUR REPOSITORIES</span>
+          {repositoriesLoading ? (
+            <p className="saved-repositories-note">Loading repositories…</p>
+          ) : repositories.length ? (
+            <div className="saved-repository-list">
+              {repositories.map((repository) => (
+                <button
+                  key={repository.repositoryId}
+                  className={
+                    !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                      && guide.name.toLowerCase() === repository.name.toLowerCase()
+                      ? "saved-repository active"
+                      : "saved-repository"
+                  }
+                  onClick={() => {
+                    onRepository(repository);
+                    setOpenMobile(false);
+                  }}
+                  title={`${repository.owner}/${repository.name}`}
+                >
+                  <Github size={14} />
+                  <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
+                  <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
+                    {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
+                  </small>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="saved-repositories-note">
+              {signedIn ? "Import a repository to save it here." : "Sign in to keep repositories across devices."}
+            </p>
+          )}
         </div>
         <div className="guide-nav">
           <span className="overline">YOUR GUIDE</span>
@@ -370,6 +415,7 @@ function FileTree({
 }
 
 export default function Home() {
+  const account = useAccount();
   const [guide, setGuide] = useState<Guide>(demoGuide);
   const [section, setSection] = useState<Section>("overview");
   const [importOpen, setImportOpen] = useState(false);
@@ -386,13 +432,84 @@ export default function Home() {
   const [sourceError, setSourceError] = useState("");
   const [read, setRead] = useState<string[]>([]);
   const [copyState, setCopyState] = useState(false);
+  const [repositories, setRepositories] = useState<SavedRepository[]>([]);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+  const [repositoryError, setRepositoryError] = useState("");
 
-  // Add this:
   const [sourceTab, setSourceTab] = useState<"explanation" | "source">(
     "explanation",
   );
   const sourceRequest = useRef(0);
+  const libraryRequest = useRef(0);
   const abort = useRef<AbortController | null>(null);
+  const showGuide = (next: Guide, reviewedPaths: string[] = []) => {
+    sourceRequest.current++;
+    setGuide(next);
+    setSourcePath(null);
+    setSourceContent("");
+    setSourceError("");
+    setSourceLoading(false);
+    setRead(reviewedPaths);
+    setQuery("");
+    setSection("overview");
+  };
+  const openSavedRepository = async (repository: SavedRepository, request = ++libraryRequest.current) => {
+    setRepositoriesLoading(true);
+    setRepositoryError("");
+    try {
+      const response = await fetch(`/api/repositories/${encodeURIComponent(repository.repositoryId)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not restore this repository.");
+      if (request === libraryRequest.current) {
+        showGuide(data.guide, Array.isArray(data.reviewedPaths) ? data.reviewedPaths : []);
+        setRepositories((current) => [
+          repository,
+          ...current.filter((item) => item.repositoryId !== repository.repositoryId),
+        ]);
+      }
+    } catch (reason) {
+      if (request === libraryRequest.current)
+        setRepositoryError(reason instanceof Error ? reason.message : "Could not restore this repository.");
+    } finally {
+      if (request === libraryRequest.current) setRepositoriesLoading(false);
+    }
+  };
+  const refreshRepositories = async () => {
+    if (!account.user) return;
+    const request = libraryRequest.current;
+    const response = await fetch("/api/repositories");
+    const data = await response.json();
+    if (request === libraryRequest.current && response.ok && Array.isArray(data.repositories))
+      setRepositories(data.repositories);
+  };
+
+  useEffect(() => {
+    const request = ++libraryRequest.current;
+    showGuide(demoGuide);
+    setRepositories([]);
+    setRepositoryError("");
+    if (!account.ready || !account.user) {
+      setRepositoriesLoading(false);
+      return;
+    }
+    setRepositoriesLoading(true);
+    void fetch("/api/repositories")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load saved repositories.");
+        const saved = Array.isArray(data.repositories) ? data.repositories as SavedRepository[] : [];
+        if (request !== libraryRequest.current) return;
+        setRepositories(saved);
+        if (saved[0]) return openSavedRepository(saved[0], request);
+        setRepositoriesLoading(false);
+      })
+      .catch((reason) => {
+        if (request === libraryRequest.current) {
+          setRepositoriesLoading(false);
+          setRepositoryError(reason instanceof Error ? reason.message : "Could not load saved repositories.");
+        }
+      });
+  }, [account.ready, account.user?.id]);
   const navigate = (s: Section) => {
     setSection(s);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -421,13 +538,10 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error || "The repository couldn't be analyzed.");
-      setGuide(data);
-      setSourcePath(null);
-      setRead([]);
-      setQuery("");
-      setSection("overview");
+      showGuide(data);
       setImportOpen(false);
       setRepoInput("");
+      if (account.user) void refreshRepositories();
     } catch (e) {
       setError(
         e instanceof Error && e.name !== "AbortError"
@@ -473,6 +587,35 @@ export default function Home() {
     } finally {
       if (request === sourceRequest.current) setSourceLoading(false);
     }
+  }
+  function toggleReviewed(path: string) {
+    const reviewed = !read.includes(path);
+    setRead((current) => reviewed
+      ? [...new Set([...current, path])]
+      : current.filter((item) => item !== path));
+    if (!account.user || guide.sample) return;
+    const adjustCount = (change: number) => setRepositories((current) => current.map((repository) =>
+      repository.owner.toLowerCase() === guide.owner.toLowerCase()
+        && repository.name.toLowerCase() === guide.name.toLowerCase()
+        && repository.commit === guide.commit
+        ? { ...repository, reviewedCount: Math.max(0, repository.reviewedCount + change) }
+        : repository));
+    adjustCount(reviewed ? 1 : -1);
+    void fetch("/api/repositories/files/reviewed", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: guide.url, commit: guide.commit, path, reviewed }),
+    }).then(async (response) => {
+      if (response.ok) return;
+      const body = await response.json();
+      throw new Error(body.error || "Could not save file progress.");
+    }).catch((reason) => {
+      setRead((current) => reviewed
+        ? current.filter((item) => item !== path)
+        : [...new Set([...current, path])]);
+      adjustCount(reviewed ? -1 : 1);
+      setRepositoryError(reason instanceof Error ? reason.message : "Could not save file progress.");
+    });
   }
   function downloadGuide() {
     const text = [
@@ -548,6 +691,10 @@ export default function Home() {
           setImportOpen(true);
         }}
         onAbout={() => setAboutOpen(true)}
+        repositories={repositories}
+        repositoriesLoading={repositoriesLoading}
+        signedIn={!!account.user}
+        onRepository={(repository) => void openSavedRepository(repository)}
       />
       <div className="workspace">
         <header className="topbar">
@@ -606,6 +753,7 @@ export default function Home() {
               </button>
             </form>
           </div>
+          {repositoryError && <p className="repository-library-error" role="alert">{repositoryError}</p>}
           {guide.sample && (
             <div className="sample-label">
               <span className="sample-dot" />
@@ -1029,13 +1177,7 @@ export default function Home() {
                         </button>
                         <button
                           className="review-button"
-                          onClick={() =>
-                            setRead((r) =>
-                              r.includes(f.path)
-                                ? r.filter((p) => p !== f.path)
-                                : [...r, f.path],
-                            )
-                          }
+                          onClick={() => toggleReviewed(f.path)}
                           aria-pressed={read.includes(f.path)}
                         >
                           <span className="review-check">
@@ -1175,10 +1317,10 @@ export default function Home() {
             <h3>Static structure, optional local AI</h3>
             <p>
               The repository guide combines a GitHub tree, manifests, and a
-              technology glossary. When signed in, opening a file sends the
-              selected section to the server owner’s local Ollama model. No paid
-              AI provider is used. AI claims include checked source excerpts,
-              but interpretation can still be wrong.
+              technology glossary. When signed in, requesting an explanation
+              sends the selected public file to the configured Gemini model in
+              ordered chunks. The Markdown response is streamed directly, but
+              its interpretation can still be wrong.
             </p>
           </div>
           <div className="about-block">
@@ -1203,12 +1345,11 @@ export default function Home() {
           <div className="about-block">
             <h3>Snapshot and privacy</h3>
             <p>
-              Live guides are pinned to a commit. Results may be cached on the
-              server for five minutes; cache entries can be evicted sooner.
-              Accounts and revocable sessions are stored in SQLite. AI
-              explanations may be cached in memory for 30 minutes. No repository
-              code is executed. Review progress is held only in this page’s
-              session.
+              Live guides are pinned to a commit. Repository snapshots and
+              source cache entries are shared, while each account stores only
+              its repository links and reviewed file paths in PostgreSQL.
+              Explanations and revocable sessions are durable. No repository
+              code is executed.
             </p>
           </div>
         </DialogContent>

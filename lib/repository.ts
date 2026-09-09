@@ -15,6 +15,19 @@ export type Tech = {
   color: string;
 };
 export type SourceFile = { path: string; content: string };
+export type SavedRepository = {
+  repositoryId: string;
+  owner: string;
+  name: string;
+  commit: string;
+  branch: string;
+  description: string;
+  stars: number;
+  fileCount: number;
+  reviewedCount: number;
+  importedAt: string;
+  lastOpenedAt: string;
+};
 export type Guide = {
   owner: string;
   name: string;

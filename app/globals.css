@@ -209,6 +209,62 @@ code {
 .new-repo:hover {
   background: #284436;
 }
+.saved-repositories {
+  padding: 22px 12px 18px;
+  border-bottom: 1px solid #2b4136;
+}
+.saved-repositories > .overline {
+  padding: 0 8px;
+  margin-bottom: 11px;
+}
+.saved-repository-list {
+  display: grid;
+  gap: 3px;
+}
+.saved-repository {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 8px;
+  border-radius: 6px;
+  color: #b9cbbf;
+  text-align: left;
+}
+.saved-repository:hover,
+.saved-repository.active {
+  color: #eff7e9;
+  background: #284436;
+}
+.saved-repository.active {
+  box-shadow: inset 2px 0 #b4d190;
+}
+.saved-repository > span {
+  min-width: 0;
+}
+.saved-repository strong,
+.saved-repository span small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.saved-repository strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.saved-repository small {
+  color: #91a79a;
+  font-size: 10px;
+}
+.saved-repositories-note {
+  padding: 2px 8px;
+  color: #91a79a;
+  font-size: 11px;
+  line-height: 1.55;
+}
 .guide-nav {
   padding: 25px 12px;
 }
@@ -389,6 +445,15 @@ code {
   color: white;
   padding: 7px 12px;
   font-size: 14px;
+}
+.repository-library-error {
+  margin: -4px 0 15px;
+  padding: 9px 12px;
+  border: 1px solid #e5c8b5;
+  border-radius: 5px;
+  color: #7a3d24;
+  background: #fff8f1;
+  font-size: 12px;
 }
 .sample-label {
   font-size: 12px;

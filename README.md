@@ -1,6 +1,6 @@
 # Peritia — durable AI source explanations
 
-A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Explanation jobs, quotas, cache access, provider usage, and billing state are durable in PostgreSQL; Redis/BullMQ connects the public API to a separate AI worker. Production uses Gemini 2.5 Flash-Lite; Ollama remains available for local development.
+A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Imported repositories, reviewed files, explanation jobs, quotas, cache access, provider usage, and billing state are durable in PostgreSQL; Redis/BullMQ connects the public API to a separate AI worker. Production uses Gemini 3.5 Flash-Lite; Ollama remains available for local development.
 
 The zero-cost Oracle beta setup, usage reporting, load testing, and release checks are documented in [OPERATIONS.md](./OPERATIONS.md).
 
@@ -42,6 +42,7 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 ### How accuracy is handled
 
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
+- Signed-in users get an isolated repository library. Per-user rows link to shared immutable GitHub snapshots instead of duplicating trees or source content; only the lightweight list loads initially, and a guide/source loads when opened.
 - One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
 - Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.

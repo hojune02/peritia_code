@@ -8,10 +8,12 @@ import { db } from "./db";
 import { ExplanationService } from "./explanations";
 import { BillingService, billingOptions } from "./billing";
 import { createQueue, startOutboxDispatcher } from "./queue";
+import { RepositoryLibrary } from "./repositories";
 
 const config = getConfig();
 const store = new PostgresStore();
 const explanations = new ExplanationService(db, config);
+const repositories = new RepositoryLibrary(db);
 const billing = config.billingEnabled
   ? new BillingService(db, billingOptions())
   : undefined;
@@ -28,7 +30,7 @@ const ready = async () => {
     ).then((result) => { if (!result.rows[0]) throw new Error("WORKER_NOT_READY"); }),
   ]);
 };
-const app = createApp(config, store, { explanations, billing, ready });
+const app = createApp(config, store, { explanations, billing, repositories, ready });
 
 // One origin for both the React frontend and Express API.
 if (process.env.NODE_ENV !== "development") {

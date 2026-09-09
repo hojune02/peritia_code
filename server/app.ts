@@ -7,6 +7,9 @@ import type { Config } from "./config";
 import type { AuthStore } from "./auth-store";
 import type { ExplanationService } from "./explanations";
 import type { BillingService } from "./billing";
+import type { RepositoryLibrary } from "./repositories";
+
+export type RepositoryEndpoints = Pick<RepositoryLibrary, "save" | "list" | "open" | "setReviewed">;
 
 export function createApp(
   config: Config,
@@ -16,6 +19,7 @@ export function createApp(
     googleVerify?: typeof verifyGoogleToken;
     explanations?: ExplanationService;
     billing?: BillingService;
+    repositories?: RepositoryEndpoints;
     ready?: () => Promise<void>;
   } = {},
 ) {
@@ -42,6 +46,23 @@ export function createApp(
   app.use("/api", sameOrigin(config));
   const auth = createAuth(config, store, dependencies.googleVerify);
   app.use("/api/auth", auth.router);
+  if (dependencies.repositories) {
+    const repositories = dependencies.repositories;
+    app.get("/api/repositories", auth.required, async (_req, res) => {
+      res.json({ repositories: await repositories.list(res.locals.user.id) });
+    });
+    app.get("/api/repositories/:repositoryId", auth.required, async (req, res) => {
+      res.json(await repositories.open(res.locals.user.id, req.params.repositoryId));
+    });
+    app.put(
+      "/api/repositories/files/reviewed",
+      auth.required,
+      limiter(500, 60 * 60 * 1000, (_req, res) => res.locals.user.id),
+      async (req, res) => {
+        res.json(await repositories.setReviewed(res.locals.user.id, req.body || {}));
+      },
+    );
+  }
   const explain = dependencies.explain || createExplainer(config);
   // The synchronous endpoint is a development/test compatibility path. A
   // production API must never run model inference in its request process.
@@ -151,7 +172,7 @@ export function createApp(
       res.status(503).json({ status: "unavailable" });
     }
   });
-  app.post("/api/analyze",   limiter(
+  app.post("/api/analyze", auth.optional, limiter(
     30,
     60 * 60 * 1_000,
     (req) => req.ip || "unknown",
@@ -164,7 +185,10 @@ export function createApp(
     }
     inFlight++;
     try {
-      res.json(await analyzeRepository(req.body?.repo));
+      const guide = await analyzeRepository(req.body?.repo);
+      if (res.locals.user && dependencies.repositories)
+        await dependencies.repositories.save(res.locals.user.id, guide);
+      res.json(guide);
     } catch (error) {
       next(error);
     } finally {

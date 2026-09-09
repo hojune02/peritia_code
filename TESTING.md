@@ -8,7 +8,7 @@ npm test
 npm run build
 ```
 
-Expected: **29 passing tests** and a successful TypeScript/client/server build. Tests use a temporary SQLite database, real Express HTTP requests, scrypt, and signed JWTs. They do not need Google credentials, internet access to GitHub, or Ollama. External responses are mocked.
+Expected: all core tests pass and the TypeScript/client/server build succeeds. Tests use a temporary SQLite database, real Express HTTP requests, scrypt, and signed JWTs. They do not need Google credentials, internet access to GitHub, or Ollama. External responses are mocked.
 
 Coverage includes original repository ingestion, password bounds and hashing, persistence, registration/login/logout, token expiration/tampering/issuer/audience, cookie flags, cross-origin rejection, request limits, OAuth state/nonce/replay, email collision handling, AI evidence validation, cache scope, context bounds, and provider failures. These tests verify software behavior; they do not establish an AI accuracy score.
 
@@ -51,6 +51,7 @@ Install/start Ollama with cloud disabled and run `ollama pull qwen2.5-coder:7b` 
 6. Switch files while generation is running. An old response must never appear under a new filename. The local server processes one generation at a time, so a quick switch can show a busy message; retry after the earlier generation finishes.
 7. Stop Ollama and select an **uncached** file. Expect an unavailable message and retry button. Static facts and source remain readable. A cached explanation can still appear while Ollama is stopped.
 8. Sign out and open another file. The model must not run; the panel should request sign-in.
+9. Import different repositories as two accounts. Hard-refresh and switch accounts. Each account should see only its own repository list and reviewed-file progress; the most recently opened repository should restore automatically.
 
 Dense/minified code, binary files, excluded filenames, and files over 64 KB are deliberately unsupported or rejected with an explanation. Missing/model-invalid results must never be represented as successful AI explanations.
 

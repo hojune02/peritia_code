@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Sparkles, Loader2, ExternalLink } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useAccount } from "./account";
 import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
+
+const MarkdownOutput = lazy(() => import("./markdown-output"));
+
+function StreamedMarkdown({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <Suspense fallback={<p className="ai-markdown-loading" role="status">Preparing the response view…</p>}>
+      <MarkdownOutput text={text} live={live} />
+    </Suspense>
+  );
+}
 
 export function AIExplanation({
   guide,
@@ -209,7 +217,7 @@ function Generated({
         </p>
       )}
       {busy && progress && (
-        <MarkdownOutput text={progress} live />
+        <StreamedMarkdown text={progress} live />
       )}
       {error && (
         <div className="ai-error">
@@ -235,7 +243,7 @@ function Generated({
             {data.cached ? "Cached result" : "Generated now"}
           </p>
           {data.rawText && (
-            <MarkdownOutput text={data.rawText} />
+            <StreamedMarkdown text={data.rawText} />
           )}
           {!data.rawText && !data.unverified &&
             data.claims.map((claim, i) => (
@@ -285,30 +293,5 @@ function Generated({
         </>
       )}
     </div>
-  );
-}
-
-function MarkdownOutput({ text, live = false }: { text: string; live?: boolean }) {
-  return (
-    <section className="ai-markdown-shell" aria-label={live ? "Live Gemini response" : "Gemini explanation"}>
-      <header className="ai-markdown-bar">
-        <span className="ai-window-dots" aria-hidden="true"><i /><i /><i /></span>
-        <span>{live ? "LIVE ANALYSIS" : "ANALYSIS COMPLETE"}</span>
-        <span className={live ? "ai-stream-state live" : "ai-stream-state"}>
-          {live ? "STREAMING" : "SAVED"}
-        </span>
-      </header>
-      <div className="ai-markdown-body">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-          }}
-        >
-          {text}
-        </ReactMarkdown>
-        {live && <span className="ai-cursor" aria-hidden="true" />}
-      </div>
-    </section>
   );
 }

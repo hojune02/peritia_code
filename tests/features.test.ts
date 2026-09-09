@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { SignJWT, decodeJwt, generateKeyPair } from "jose";
-import { createApp } from "../server/app";
+import { createApp, type RepositoryEndpoints } from "../server/app";
 import { Store } from "../server/store";
 import { getConfig } from "../server/config";
 import {
@@ -17,6 +17,7 @@ import {
 } from "../server/auth";
 import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
+import { demoGuide } from "../lib/demo";
 import { chunkExplanationFile, makeCacheKey } from "../server/explanations";
 import { verifyWebhook } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
@@ -184,6 +185,7 @@ async function fixture(
   options: {
     googleVerify?: typeof verifyGoogleToken;
     production?: boolean;
+    repositories?: RepositoryEndpoints;
   } = {},
 ) {
   const store = new Store(":memory:");
@@ -200,6 +202,7 @@ async function fixture(
       explanations++;
       return { ...output, status: "generated" } as Explanation;
     },
+    repositories: options.repositories,
   });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -227,12 +230,18 @@ async function fixture(
     });
   const get = (path: string, token = "") =>
     nativeFetch(url + path, { headers: { Cookie: token }, redirect: "manual" });
+  const put = (path: string, body: unknown, token = "") =>
+    nativeFetch(url + path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Origin: origin, Cookie: token },
+      body: JSON.stringify(body),
+    });
   const register = async (email = "person@example.com") => {
     const response = await post("/api/auth/register", { email, password });
     assert.equal(response.status, 201);
     return response.headers.get("set-cookie")!.split(";")[0];
   };
-  return { store, post, get, register, count: () => explanations };
+  return { store, post, put, get, register, count: () => explanations };
 }
 
 test("passwords are salted, hashed, and checked; bounds prevent oversized KDF input", async () => {
@@ -300,6 +309,44 @@ test("credential HTTP flow: register, reload session, logout/replay, login and w
     ).status,
     409,
   );
+});
+test("repository library endpoints use the authenticated account identity", async (t) => {
+  const listed: string[] = [];
+  const opened: string[] = [];
+  const reviewed: string[] = [];
+  const repositories: RepositoryEndpoints = {
+    save: async () => undefined,
+    list: async (userId) => {
+      listed.push(userId);
+      return [];
+    },
+    open: async (userId) => {
+      opened.push(userId);
+      return { guide: demoGuide, reviewedPaths: [] };
+    },
+    setReviewed: async (userId) => {
+      reviewed.push(userId);
+      return { ok: true };
+    },
+  };
+  const f = await fixture(t, { repositories });
+  const firstCookie = await f.register("first@example.com");
+  const secondCookie = await f.register("second@example.com");
+  const first = await (await f.get("/api/auth/session", firstCookie)).json();
+  const second = await (await f.get("/api/auth/session", secondCookie)).json();
+  assert.equal((await f.get("/api/repositories")).status, 401);
+  assert.equal((await f.get("/api/repositories", firstCookie)).status, 200);
+  assert.equal((await f.get("/api/repositories", secondCookie)).status, 200);
+  assert.equal((await f.get("/api/repositories/123", firstCookie)).status, 200);
+  assert.equal((await f.put("/api/repositories/files/reviewed", {
+    repo: "https://github.com/example/repo",
+    commit: "a".repeat(40),
+    path: "src/main.ts",
+    reviewed: true,
+  }, secondCookie)).status, 200);
+  assert.deepEqual(listed, [first.user.id, second.user.id]);
+  assert.deepEqual(opened, [first.user.id]);
+  assert.deepEqual(reviewed, [second.user.id]);
 });
 test("JWT: unsigned, tampered, expired, wrong-audience, wrong-issuer tokens are rejected", async (t) => {
   const f = await fixture(t);

@@ -4,6 +4,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { ExplanationService, failExplanation, processExplanation } from "../server/explanations";
 import { getConfig } from "../server/config";
+import { RepositoryLibrary } from "../server/repositories";
+import type { Guide } from "../lib/repository";
 
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {
   if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
@@ -106,4 +108,58 @@ test("terminal worker failure releases a reserved credit", async (t) => {
   const usage = await service.usage(userId);
   assert.deepEqual({ reserved: usage.reserved, consumed: usage.consumed, remaining: usage.remaining }, { reserved: 0, consumed: 0, remaining: 3 });
   assert.equal((await service.get(userId, submitted.job.id)).status, "failed");
+});
+
+test("saved repositories and reviewed files are isolated by user", async (t) => {
+  if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 4 });
+  const firstUser = randomUUID();
+  const secondUser = randomUUID();
+  const firstRepository = `test-${randomUUID()}`;
+  const secondRepository = `test-${randomUUID()}`;
+  const firstCommit = "a".repeat(40);
+  const secondCommit = "b".repeat(40);
+  const previousCacheMode = process.env.GITHUB_CACHE_MODE;
+  process.env.GITHUB_CACHE_MODE = "postgres";
+  t.after(async () => {
+    if (previousCacheMode === undefined) delete process.env.GITHUB_CACHE_MODE;
+    else process.env.GITHUB_CACHE_MODE = previousCacheMode;
+    await pool.query(`DELETE FROM users WHERE id IN ($1,$2)`, [firstUser, secondUser]);
+    await pool.query(`DELETE FROM repo_snapshots WHERE repository_id IN ($1,$2)`, [firstRepository, secondRepository]);
+    await pool.end();
+  });
+  await pool.query(
+    `INSERT INTO users(id,email,password) VALUES($1,$2,'hash'),($3,$4,'hash')`,
+    [firstUser, `${firstUser}@example.test`, secondUser, `${secondUser}@example.test`],
+  );
+  const tree = { tree: [{ path: "src/main.ts", type: "blob", sha: "c".repeat(40), size: 20 }] };
+  await pool.query(
+    `INSERT INTO repo_snapshots
+       (repository_id,owner,name,commit_sha,default_branch,tree_json,metadata_json)
+     VALUES
+       ($1,'alice','one',$2,'main',$3,$4),
+       ($5,'bob','two',$6,'main',$3,$7)`,
+    [
+      firstRepository, firstCommit, tree, { description: "First", stargazers_count: 3 },
+      secondRepository, secondCommit, { description: "Second", stargazers_count: 7 },
+    ],
+  );
+  const library = new RepositoryLibrary(pool);
+  const guide = (owner: string, name: string, commit: string) => ({ owner, name, commit } as Guide);
+  await library.save(firstUser, guide("alice", "one", firstCommit));
+  await library.save(secondUser, guide("bob", "two", secondCommit));
+  assert.deepEqual((await library.list(firstUser)).map((item) => item.name), ["one"]);
+  assert.deepEqual((await library.list(secondUser)).map((item) => item.name), ["two"]);
+  await assert.rejects(library.open(secondUser, firstRepository), (error: any) => error?.status === 404);
+
+  await library.setReviewed(firstUser, {
+    repo: "https://github.com/alice/one",
+    commit: firstCommit,
+    path: "src/main.ts",
+    reviewed: true,
+  });
+  const restored = await library.open(firstUser, firstRepository);
+  assert.equal(restored.guide.name, "one");
+  assert.deepEqual(restored.reviewedPaths, ["src/main.ts"]);
+  assert.deepEqual((await library.open(secondUser, secondRepository)).reviewedPaths, []);
 });

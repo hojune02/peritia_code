@@ -206,6 +206,11 @@ const user = await store.sessionUser(
     res.locals.user = publicUser(current.user);
     next();
   };
+  const optional: RequestHandler = async (req, res, next) => {
+    const current = await session(req);
+    if (current) res.locals.user = publicUser(current.user);
+    next();
+  };
   router.get("/session", async (req, res) => {
     const current = await session(req);
     res.json({
@@ -358,5 +363,5 @@ res.status(201).json({
       res.redirect(config.origin + "/?auth_error=google_failed");
     }
   });
-  return { router, required };
+  return { router, required, optional };
 }

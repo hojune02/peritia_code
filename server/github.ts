@@ -474,6 +474,82 @@ async function readInitialSources(input: {
   };
 }
 
+async function assembleGuide(input: {
+  owner: string;
+  name: string;
+  commit: string;
+  defaultBranch: string;
+  metadata: GitHubRepository;
+  tree: GitHubTree;
+  snapshot: RepositorySnapshot | null;
+  cache: PersistentCacheModule | null;
+  analyzedAt: string;
+}) {
+  const allowed = selectRepositoryFiles(input.tree);
+  const warnings: string[] = [];
+  if (input.tree.truncated === true || allowed.length > MAX_VISIBLE_FILES) {
+    warnings.push(
+      "Partial repository: GitHub's tree limit or Peritia's 2,500-file limit was reached. Counts describe only the visible snapshot.",
+    );
+  }
+  const files = allowed.slice(0, MAX_VISIBLE_FILES);
+  const { selected, manifestCount } = selectInitialSources(files);
+  if (manifestCount > MAX_MANIFESTS) {
+    warnings.push(
+      "This repository contains more than eight manifests. Technology detection covers the first eight, prioritizing root-level files.",
+    );
+  }
+  const { sources, failures } = await readInitialSources({
+    selected,
+    owner: input.owner,
+    name: input.name,
+    commit: input.commit,
+    snapshot: input.snapshot,
+    cache: input.cache,
+  });
+  if (failures > 0) {
+    warnings.push(
+      `${failures} selected file${failures === 1 ? "" : "s"} could not be read. Some dependency details may be missing; file names remain available.`,
+    );
+  }
+  return buildGuide({
+    owner: input.owner,
+    name: input.name,
+    description: typeof input.metadata.description === "string"
+      ? input.metadata.description
+      : "The repository author hasn't provided a description. Read its README and entry points to establish the project's purpose.",
+    branch: input.defaultBranch,
+    commit: input.commit,
+    url: `https://github.com/${input.owner}/${input.name}`,
+    stars: typeof input.metadata.stargazers_count === "number"
+      ? input.metadata.stargazers_count
+      : 0,
+    files,
+    sources,
+    warnings,
+    analyzedAt: input.analyzedAt,
+  });
+}
+
+export async function restoreRepositoryGuide(snapshot: RepositorySnapshot): Promise<Guide> {
+  const cache = await loadPersistentCache();
+  if (!cache) throw new RepoError("Persistent repository storage is unavailable.", 503);
+  const metadata = typeof snapshot.metadata === "object" && snapshot.metadata !== null
+    ? snapshot.metadata as GitHubRepository
+    : {};
+  return assembleGuide({
+    owner: snapshot.owner,
+    name: snapshot.name,
+    commit: snapshot.commitSha,
+    defaultBranch: snapshot.defaultBranch,
+    metadata,
+    tree: requireTree(snapshot.tree),
+    snapshot,
+    cache,
+    analyzedAt: snapshot.createdAt.toISOString(),
+  });
+}
+
 export async function analyzeRepository(
   input: unknown,
 ): Promise<Guide> {
@@ -568,71 +644,15 @@ const repositoryId = persistentCache
     }
   }
 
-  const allowed = selectRepositoryFiles(tree);
-  const warnings: string[] = [];
-
-  if (
-    tree.truncated === true ||
-    allowed.length > MAX_VISIBLE_FILES
-  ) {
-    warnings.push(
-      "Partial repository: GitHub's tree limit or Peritia's 2,500-file limit was reached. Counts describe only the visible snapshot.",
-    );
-  }
-
-  const files = allowed.slice(
-    0,
-    MAX_VISIBLE_FILES,
-  );
-
-  const {
-    selected,
-    manifestCount,
-  } = selectInitialSources(files);
-
-  if (manifestCount > MAX_MANIFESTS) {
-    warnings.push(
-      "This repository contains more than eight manifests. Technology detection covers the first eight, prioritizing root-level files.",
-    );
-  }
-
-  const {
-    sources,
-    failures,
-  } = await readInitialSources({
-    selected,
+  const guide = await assembleGuide({
     owner,
     name,
+    defaultBranch,
     commit,
+    metadata,
+    tree,
     snapshot,
     cache: persistentCache,
-  });
-
-  if (failures > 0) {
-    warnings.push(
-      `${failures} selected file${
-        failures === 1 ? "" : "s"
-      } could not be read. Some dependency details may be missing; file names remain available.`,
-    );
-  }
-
-  const guide = buildGuide({
-    owner,
-    name,
-    description:
-      typeof metadata.description === "string"
-        ? metadata.description
-        : "The repository author hasn't provided a description. Read its README and entry points to establish the project's purpose.",
-    branch: defaultBranch,
-    commit,
-    url: `https://github.com/${owner}/${name}`,
-    stars:
-      typeof metadata.stargazers_count === "number"
-        ? metadata.stargazers_count
-        : 0,
-    files,
-    sources,
-    warnings,
     analyzedAt: new Date().toISOString(),
   });
 
