@@ -35,7 +35,7 @@ ollama pull qwen2.5-coder:7b
 ```
 
 4. Keep Ollama running. If the desktop app/service is not already running, use `ollama serve` in another terminal. Verify it with `ollama list`.
-5. Sign in to Peritia, open **File explorer**, select a readable file, and explicitly request an explanation. You can browse or close the tab while the worker continues; reopening reconnects to the durable job. Expand **Inspect evidence** to compare each claim with exact source lines.
+5. Sign in to Peritia, open **File explorer**, select a readable file, and explicitly request an explanation. You can browse or close the tab while the worker continues; reopening reconnects to the durable job. Gemini's text appears as it is generated and the final response remains available with the job.
 
 The default local model download is about 4.7 GB; it also needs memory for the model and its context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is separate and is not bundled with the application.
 
@@ -43,9 +43,9 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
 - The model receives a numbered **80-line section**, not an assertion that it has read the whole repository. Select the next section for longer files. Dense/minified sections that exceed the input budget are refused without silent truncation.
-- Structured output includes claims, observation/inference labels, source line ranges, exact excerpts, and limitations. Every quoted excerpt and range is checked against the selected source before rendering. Invalid output is rejected as a whole.
+- The production Gemini response is streamed directly as text and is not blocked by a structured-output validator. The prompt requests an ordered, line-by-line walkthrough, but users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
-- **A valid citation does not prove the explanation is true.** A model can misinterpret correctly quoted code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
+- **A line reference does not prove the explanation is true.** A model can misinterpret code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
 - Completed output is cached durably by immutable source, line range, detail level, prompt version, generation options, and model digest. Each new unlock reserves one atomic quota credit, including a shared cache hit; previously unlocked output remains accessible without another credit.
 
 The curated technology glossary and static file facts remain available when AI is unavailable. See **TESTING.md** for a real-model C/Python/React evaluation and a human accuracy rubric.
@@ -97,7 +97,7 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
 | AI_PROVIDER                             | `ollama` for local development or `gemini` for the production worker.                                                                  |
 | GEMINI_API_KEY                          | Server-only Gemini credential. Required when `AI_PROVIDER=gemini`.                                                                     |
-| GEMINI_MODEL                            | Production model; defaults to `gemini-2.5-flash-lite`.                                                                                  |
+| GEMINI_MODEL                            | Production model; defaults to `gemini-3.5-flash-lite`.                                                                                  |
 | GEMINI_BILLING_TIER                     | `free` records zero billed cost; `paid` records estimated list-price cost as billed cost.                                               |
 | AI_MODEL_REVISION                       | Deployment-controlled cache revision. Change it when model or provider behavior changes.                                                |
 | BILLING_ENABLED                         | Defaults to `false`. Billing routes and processing do not start unless explicitly enabled.                                              |
@@ -154,9 +154,9 @@ Keep the `postgres` and `redis` named volumes: **do not run `docker compose down
 | ---------------------------------------- | ------------------------------------------------------------------------- |
 | app/page.tsx, app/globals.css            | Original interactive repository guide                                     |
 | components/account.tsx, app/features.css | Login dialog and account UI                                               |
-| components/ai-explanation.tsx            | Section selection, generation state, citations, stale-response protection |
+| components/ai-explanation.tsx            | Section selection, live generation output, and stale-response protection  |
 | server/auth.ts, server/store.ts          | Passwords, JWTs, Google OAuth, persistence                                |
-| server/ai.ts, server/gemini.ts           | Evidence validation, Gemini streaming, token and cost accounting          |
+| server/ai.ts, server/gemini.ts           | Local-model validation, Gemini streaming, token and cost accounting       |
 | server/config.ts, server/app.ts          | Configuration validation and API routes                                   |
 | server/github.ts, lib/repository.ts      | Public GitHub ingestion and static analysis                               |
 | tests/features.test.ts                   | HTTP/auth and AI contract tests                                           |

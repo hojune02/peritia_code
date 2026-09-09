@@ -38,7 +38,7 @@ export function startOutboxDispatcher(pool: Pool, queue: Queue) {
       active = false;
     }
   };
-  const timer = setInterval(() => void dispatch(), 1_000);
+  const timer = setInterval(() => void dispatch(), 250);
   timer.unref();
   void dispatch();
   return () => { stopped = true; clearInterval(timer); };

@@ -26,7 +26,7 @@ export function AIExplanation({
       <h3>Understand the code</h3>
       <p className="metadata-note">
         The selected public source section is sent to the configured AI provider.
-        Source citations are checked; the explanation can still be mistaken.
+        Gemini's response is streamed directly; verify its line references and conclusions.
       </p>
       {total > PAGE_LINES && (
         <label className="ai-range">
@@ -77,12 +77,17 @@ function UsageControl() {
   const [usage, setUsage] = useState<{ plan: string; remaining: number; billingEnabled: boolean } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    void fetch("/api/usage")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Usage is unavailable.");
-        setUsage(await response.json());
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Usage is unavailable."));
+    const load = () => {
+      void fetch("/api/usage")
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Usage is unavailable.");
+          setUsage(await response.json());
+        })
+        .catch((reason) => setError(reason instanceof Error ? reason.message : "Usage is unavailable."));
+    };
+    load();
+    window.addEventListener("peritia:usage-changed", load);
+    return () => window.removeEventListener("peritia:usage-changed", load);
   }, []);
   const openBilling = async (path: "checkout" | "portal") => {
     setError("");
@@ -149,10 +154,12 @@ function Generated({
       if (snapshot.result) setData(snapshot.result);
       if (snapshot.status === "completed") {
         setBusy(false);
+        window.dispatchEvent(new Event("peritia:usage-changed"));
         events.close();
       } else if (snapshot.status === "failed") {
         setBusy(false);
         setError("The explanation failed and its reserved credit was restored.");
+        window.dispatchEvent(new Event("peritia:usage-changed"));
         events.close();
       }
     };
@@ -201,8 +208,6 @@ function Generated({
       } catch (e) {
         setBusy(false);
         setError(e instanceof Error ? e.message : "Explanation failed.");
-      } finally {
-        if (!jobId) setBusy(false);
       }
     })();
   };
@@ -217,15 +222,15 @@ function Generated({
         <p className="ai-loading" role="status">
           <Loader2 size={18} className="spin" />
           {progress
-            ? "Generating… progress is saved if you leave this tab."
+            ? "Gemini is responding… progress is saved if you leave this tab."
             : "Queued for the AI model… You can keep browsing."}
         </p>
       )}
       {busy && progress && (
-        <details className="ai-raw-response">
-          <summary>Show generation progress</summary>
+        <div className="ai-live-response">
+          <strong>Gemini is responding</strong>
           <pre><code>{progress}</code></pre>
-        </details>
+        </div>
       )}
       {error && (
         <div className="ai-error">
@@ -250,21 +255,15 @@ function Generated({
             {data.totalLines} ·{" "}
             {data.cached ? "Cached result" : "Generated now"}
           </p>
-          {data.unverified && data.rawText && (
-            <div className="ai-raw-response">
-              <strong>Unverified AI response</strong>
-
-              <p>
-                The model answered, but its citation metadata did not pass
-                validation. Check this explanation against the Source code tab.
-              </p>
-
+          {data.rawText && (
+            <div className="ai-live-response">
+              <strong>Gemini explanation</strong>
               <pre>
                 <code>{data.rawText}</code>
               </pre>
             </div>
           )}
-          {!data.unverified &&
+          {!data.rawText && !data.unverified &&
             data.claims.map((claim, i) => (
               <article className="ai-claim" key={i}>
                 <span className={`claim-kind ${claim.kind}`}>

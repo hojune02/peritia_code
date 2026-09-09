@@ -21,7 +21,7 @@ test("one remaining credit accepts only one of ten concurrent jobs", async (t) =
     JWT_SECRET: randomBytes(32).toString("hex"),
     AI_PROVIDER: "gemini",
     GEMINI_API_KEY: "integration-test-key",
-    GEMINI_MODEL: "gemini-2.5-flash-lite",
+    GEMINI_MODEL: "gemini-3.5-flash-lite",
     GEMINI_BILLING_TIER: "free",
     AI_MODEL_REVISION: modelRevision,
   });
@@ -38,15 +38,12 @@ test("one remaining credit accepts only one of ten concurrent jobs", async (t) =
   const usage = await service.usage(userId);
   assert.deepEqual({ reserved: usage.reserved, consumed: usage.consumed, remaining: usage.remaining }, { reserved: 1, consumed: 0, remaining: 0 });
 
-  const output = JSON.stringify({
-    claims: [{ text: "Imports a task hook.", kind: "observation", startLine: 1, endLine: 1 }],
-    limitations: ["Only this file section was supplied."],
-  });
+  const output = "Line 1: Imports a task hook.\n\nLines 2–4: Defines the component's initial setup.";
   const records = [
     { candidates: [{ content: { parts: [{ text: output.slice(0, 19) }] } }] },
     {
       candidates: [{ content: { parts: [{ text: output.slice(19) }] }, finishReason: "STOP" }],
-      modelVersion: "gemini-2.5-flash-lite-001",
+      modelVersion: "gemini-3.5-flash-lite-001",
       usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 400, totalTokenCount: 2400 },
     },
   ].map((record) => `data: ${JSON.stringify(record)}\n\n`).join("");
@@ -65,11 +62,13 @@ test("one remaining credit accepts only one of ten concurrent jobs", async (t) =
   } finally { globalThis.fetch = originalFetch; }
   const settled = await service.usage(userId);
   assert.deepEqual({ reserved: settled.reserved, consumed: settled.consumed }, { reserved: 0, consumed: 1 });
-  assert.equal((await service.get(userId, acceptedResult.value.job.id)).status, "completed");
+  const completed = await service.get(userId, acceptedResult.value.job.id);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.result?.rawText, output);
   const metric = await pool.query(`SELECT * FROM ai_generation_usage WHERE job_id=$1`, [acceptedResult.value.job.id]);
   assert.equal(metric.rows.length, 1);
   assert.equal(metric.rows[0].provider, "gemini");
-  assert.equal(metric.rows[0].model_version, "gemini-2.5-flash-lite-001");
+  assert.equal(metric.rows[0].model_version, "gemini-3.5-flash-lite-001");
   assert.equal(metric.rows[0].input_tokens, 2000);
   assert.equal(metric.rows[0].output_tokens, 400);
   assert.equal(Number(metric.rows[0].estimated_list_cost_usd), 0.00036);

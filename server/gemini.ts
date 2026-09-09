@@ -1,4 +1,3 @@
-import { explanationSchema } from "./ai";
 import type { Config } from "./config";
 
 export type GeminiUsage = {
@@ -12,6 +11,8 @@ export type GeminiGeneration = {
   text: string;
   modelVersion: string;
   usage: GeminiUsage;
+  complete: boolean;
+  completionReason?: string;
 };
 
 export class GeminiGenerationError extends Error {
@@ -77,8 +78,8 @@ export function estimateGeminiCost(
   usage: GeminiUsage,
   env = process.env,
 ) {
-  const inputRate = Number(env.GEMINI_INPUT_USD_PER_MILLION ?? 0.1);
-  const outputRate = Number(env.GEMINI_OUTPUT_USD_PER_MILLION ?? 0.4);
+  const inputRate = Number(env.GEMINI_INPUT_USD_PER_MILLION ?? 0.3);
+  const outputRate = Number(env.GEMINI_OUTPUT_USD_PER_MILLION ?? 2.5);
   if (![inputRate, outputRate].every((rate) => Number.isFinite(rate) && rate >= 0))
     throw new Error("Gemini token prices must be non-negative numbers.");
   return (
@@ -106,10 +107,10 @@ export async function generateWithGemini(
       systemInstruction: { parts: [{ text: messages.system }] },
       contents: [{ role: "user", parts: [{ text: messages.user }] }],
       generationConfig: {
-        temperature: 0,
-        maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 600),
-        responseMimeType: "application/json",
-        responseJsonSchema: explanationSchema,
+        maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 1600),
+        ...(config.model.startsWith("gemini-3")
+          ? { thinkingConfig: { thinkingLevel: "minimal" } }
+          : {}),
       },
     }),
   });
@@ -120,6 +121,7 @@ export async function generateWithGemini(
   let modelVersion = config.model;
   let finishReason = "";
   let blocked = "";
+  let streamError = "";
   const usage: GeminiUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -146,19 +148,27 @@ export async function generateWithGemini(
       await onText(text);
     });
   } catch (error) {
-    throw new GeminiGenerationError(
-      error instanceof Error ? error.message : "GEMINI_STREAM_FAILED",
-      usage.totalTokens ? usage : undefined,
-      modelVersion,
-    );
+    streamError = error instanceof Error ? error.message : "GEMINI_STREAM_FAILED";
   }
   if (!usage.totalTokens)
     usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.thoughtTokens;
-  if (blocked) throw new GeminiGenerationError(`GEMINI_PROMPT_BLOCKED_${blocked}`, usage, modelVersion);
-  if (finishReason && finishReason !== "STOP")
-    throw new GeminiGenerationError(`GEMINI_FINISH_${finishReason}`, usage, modelVersion);
-  if (!text.trim()) throw new GeminiGenerationError("GEMINI_EMPTY_RESPONSE", usage, modelVersion);
-  if (!usage.inputTokens || !usage.totalTokens)
-    throw new GeminiGenerationError("GEMINI_USAGE_MISSING", usage, modelVersion);
-  return { text, modelVersion, usage };
+  if (streamError === "GEMINI_RESPONSE_TOO_LARGE")
+    throw new GeminiGenerationError(streamError, usage.totalTokens ? usage : undefined, modelVersion);
+  if (!text.trim()) {
+    const reason = streamError
+      || (blocked ? `GEMINI_PROMPT_BLOCKED_${blocked}` : "")
+      || (finishReason ? `GEMINI_FINISH_${finishReason}` : "")
+      || "GEMINI_EMPTY_RESPONSE";
+    throw new GeminiGenerationError(reason, usage.totalTokens ? usage : undefined, modelVersion);
+  }
+  const completionReason = streamError
+    || (blocked ? `PROMPT_BLOCKED_${blocked}` : "")
+    || (finishReason && finishReason !== "STOP" ? finishReason : "");
+  return {
+    text,
+    modelVersion,
+    usage,
+    complete: !completionReason,
+    ...(completionReason ? { completionReason } : {}),
+  };
 }

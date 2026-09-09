@@ -154,7 +154,8 @@
   vertical-align: middle;
   margin-right: 4px;
 }
-.ai-raw-response {
+.ai-raw-response,
+.ai-live-response {
   margin-top: 18px;
   padding: 18px;
   border: 1px solid #e1bd72;
@@ -162,7 +163,13 @@
   background: #fff8e8;
 }
 
-.ai-raw-response > strong {
+.ai-live-response {
+  border-color: #b9d2bf;
+  background: #ffffff;
+}
+
+.ai-raw-response > strong,
+.ai-live-response > strong {
   display: block;
   margin-bottom: 8px;
   color: #77530e;
@@ -171,14 +178,20 @@
   letter-spacing: 0.04em;
 }
 
-.ai-raw-response > p {
+.ai-live-response > strong {
+  color: #356449;
+}
+
+.ai-raw-response > p,
+.ai-live-response > p {
   margin: 0 0 14px;
   color: #6b5934;
   font-size: 13px;
   line-height: 1.6;
 }
 
-.ai-raw-response pre {
+.ai-raw-response pre,
+.ai-live-response pre {
   max-height: 480px;
   margin: 0;
   padding: 14px;

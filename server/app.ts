@@ -113,7 +113,7 @@ export function createApp(
           res.end();
         } finally { polling = false; }
       };
-      const timer = setInterval(() => void send(), 500);
+      const timer = setInterval(() => void send(), 250);
       const heartbeat = setInterval(() => { if (!closed) res.write(": heartbeat\n\n"); }, 15_000);
       req.once("close", () => { closed = true; clearInterval(timer); clearInterval(heartbeat); });
       void send();

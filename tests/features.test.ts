@@ -79,14 +79,14 @@ test("Gemini streaming preserves partial output and reports provider usage", asy
     JWT_SECRET: config.secret,
     AI_PROVIDER: "gemini",
     GEMINI_API_KEY: "test-api-key",
-    GEMINI_MODEL: "gemini-2.5-flash-lite",
+    GEMINI_MODEL: "gemini-3.5-flash-lite",
     AI_MODEL_REVISION: "test-revision",
   });
   const events = [
-    { candidates: [{ content: { parts: [{ text: '{"claims":[],' }] } }] },
+    { candidates: [{ content: { parts: [{ text: "Lines 1–2: Imports " }] } }] },
     {
-      candidates: [{ content: { parts: [{ text: '"limitations":[]}' }] }, finishReason: "STOP" }],
-      modelVersion: "gemini-2.5-flash-lite-001",
+      candidates: [{ content: { parts: [{ text: "the module." }] }, finishReason: "STOP" }],
+      modelVersion: "gemini-3.5-flash-lite-001",
       usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 400, thoughtsTokenCount: 25, totalTokenCount: 2425 },
     },
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
@@ -97,17 +97,44 @@ test("Gemini streaming preserves partial output and reports provider usage", asy
     async (text) => { partial.push(text); },
     async (_url, init) => {
       assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "test-api-key");
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.generationConfig.responseJsonSchema, undefined);
+      assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "minimal");
       return new Response(events, { headers: { "Content-Type": "text/event-stream" } });
     },
   );
-  assert.equal(generated.text, '{"claims":[],"limitations":[]}');
-  assert.equal(generated.modelVersion, "gemini-2.5-flash-lite-001");
+  assert.equal(generated.text, "Lines 1–2: Imports the module.");
+  assert.equal(generated.modelVersion, "gemini-3.5-flash-lite-001");
+  assert.equal(generated.complete, true);
   assert.deepEqual(generated.usage, { inputTokens: 2000, outputTokens: 400, thoughtTokens: 25, totalTokens: 2425 });
-  assert.deepEqual(partial, ['{"claims":[],', '{"claims":[],"limitations":[]}']);
+  assert.deepEqual(partial, ["Lines 1–2: Imports ", "Lines 1–2: Imports the module."]);
   assert.equal(estimateGeminiCost(generated.usage, {
     GEMINI_INPUT_USD_PER_MILLION: "0.10",
     GEMINI_OUTPUT_USD_PER_MILLION: "0.40",
   }), 0.00037);
+});
+
+test("Gemini returns received text when a stream ends before normal completion", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+    GEMINI_MODEL: "gemini-3.5-flash-lite",
+  });
+  const event = `data: ${JSON.stringify({
+    candidates: [{ content: { parts: [{ text: "Lines 1–4: Partial explanation" }] }, finishReason: "MAX_TOKENS" }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 },
+  })}\n\n`;
+  const generated = await generateWithGemini(
+    geminiConfig,
+    { system: "system", user: "user" },
+    async () => undefined,
+    async () => new Response(event),
+  );
+  assert.equal(generated.text, "Lines 1–4: Partial explanation");
+  assert.equal(generated.complete, false);
+  assert.equal(generated.completionReason, "MAX_TOKENS");
 });
 
 test("Gemini failures retain provider-reported token usage for cost accounting", async () => {

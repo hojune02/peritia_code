@@ -48,7 +48,7 @@ export function getConfig(env = process.env): Config {
   if (env.AI_PROVIDER && !["gemini", "ollama"].includes(env.AI_PROVIDER))
     throw new Error("AI_PROVIDER must be gemini or ollama.");
   const model = aiProvider === "gemini"
-    ? env.GEMINI_MODEL || "gemini-2.5-flash-lite"
+    ? env.GEMINI_MODEL || "gemini-3.5-flash-lite"
     : env.OLLAMA_MODEL || "qwen2.5-coder:7b";
   if (aiProvider === "gemini" && !/^gemini-[a-z0-9.-]+$/.test(model))
     throw new Error("GEMINI_MODEL must be a Gemini model name.");
@@ -61,8 +61,8 @@ export function getConfig(env = process.env): Config {
   if (!["free", "paid"].includes(geminiBillingTier))
     throw new Error("GEMINI_BILLING_TIER must be free or paid.");
   for (const [name, value] of [
-    ["GEMINI_INPUT_USD_PER_MILLION", env.GEMINI_INPUT_USD_PER_MILLION ?? "0.10"],
-    ["GEMINI_OUTPUT_USD_PER_MILLION", env.GEMINI_OUTPUT_USD_PER_MILLION ?? "0.40"],
+    ["GEMINI_INPUT_USD_PER_MILLION", env.GEMINI_INPUT_USD_PER_MILLION ?? "0.30"],
+    ["GEMINI_OUTPUT_USD_PER_MILLION", env.GEMINI_OUTPUT_USD_PER_MILLION ?? "2.50"],
   ] as const) {
     if (!Number.isFinite(Number(value)) || Number(value) < 0)
       throw new Error(`${name} must be a non-negative number.`);
