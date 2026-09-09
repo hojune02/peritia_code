@@ -42,11 +42,11 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 ### How accuracy is handled
 
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
-- The model receives a numbered **80-line section**, not an assertion that it has read the whole repository. Select the next section for longer files. Dense/minified sections that exceed the input budget are refused without silent truncation.
-- The production Gemini response is streamed directly as text and is not blocked by a structured-output validator. The prompt requests an ordered, line-by-line walkthrough, but users must verify line references and conclusions against the Source code tab.
+- One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
+- Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
 - **A line reference does not prove the explanation is true.** A model can misinterpret code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
-- Completed output is cached durably by immutable source, line range, detail level, prompt version, generation options, and model digest. Each new unlock reserves one atomic quota credit, including a shared cache hit; previously unlocked output remains accessible without another credit.
+- Completed output is cached durably by immutable source, whole-file range, detail level, prompt version, generation options, and model digest. Each new unlock reserves one atomic quota credit, including a shared cache hit; previously unlocked output remains accessible without another credit.
 
 The curated technology glossary and static file facts remain available when AI is unavailable. See **TESTING.md** for a real-model C/Python/React evaluation and a human accuracy rubric.
 

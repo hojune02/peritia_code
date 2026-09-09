@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Sparkles, Loader2, ExternalLink } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAccount } from "./account";
-import { PAGE_LINES, type Explanation } from "../lib/explanation";
+import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
 
 export function AIExplanation({
@@ -16,7 +18,6 @@ export function AIExplanation({
   level: string;
 }) {
   const account = useAccount();
-  const [page, setPage] = useState(0);
   const total = content.replace(/\r\n/g, "\n").split("\n").length;
   return (
     <section className="ai-panel" aria-label="AI file explanation">
@@ -25,25 +26,10 @@ export function AIExplanation({
       </span>
       <h3>Understand the code</h3>
       <p className="metadata-note">
-        The selected public source section is sent to the configured AI provider.
-        Gemini's response is streamed directly; verify its line references and conclusions.
+        The complete selected public file is explained in ordered chunks. Gemini's
+        Markdown streams directly; verify its conclusions against the source.
       </p>
-      {total > PAGE_LINES && (
-        <label className="ai-range">
-          Section to explain
-          <select
-            value={page}
-            onChange={(e) => setPage(Number(e.target.value))}
-          >
-            {Array.from({ length: Math.ceil(total / PAGE_LINES) }, (_, i) => (
-              <option key={i} value={i}>
-                Lines {i * PAGE_LINES + 1}–
-                {Math.min(total, (i + 1) * PAGE_LINES)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <p className="ai-file-scope">Entire file · {total.toLocaleString()} lines</p>
       {!account.ready ? (
         <p role="status">Checking your session…</p>
       ) : !account.user ? (
@@ -59,12 +45,10 @@ export function AIExplanation({
               guide.url,
               guide.commit,
               path,
-              page,
               level,
             ].join(":")}
             guide={guide}
             path={path}
-            page={page}
             level={level}
           />
         </>
@@ -118,12 +102,10 @@ function UsageControl() {
 function Generated({
   guide,
   path,
-  page,
   level,
 }: {
   guide: Guide;
   path: string;
-  page: number;
   level: string;
 }) {
   const { refresh, user } = useAccount();
@@ -132,7 +114,7 @@ function Generated({
     [busy, setBusy] = useState(false),
     [jobId, setJobId] = useState<string | null>(null),
     [progress, setProgress] = useState("");
-  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:${page}:${level}`;
+  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:file:${level}`;
 
   useEffect(() => {
     const saved = sessionStorage.getItem(storageKey);
@@ -193,7 +175,7 @@ function Generated({
             repositoryId: guide.sample ? "sample" : guide.url,
             commit: guide.commit,
             path,
-            page,
+            scope: "file",
             level,
           }),
           signal: controller.signal,
@@ -215,7 +197,7 @@ function Generated({
     <div aria-live="polite">
       {!jobId && !busy && (
         <button className="primary-button" onClick={generate}>
-          Explain this section
+          Explain the entire file
         </button>
       )}
       {busy && (
@@ -227,10 +209,7 @@ function Generated({
         </p>
       )}
       {busy && progress && (
-        <div className="ai-live-response">
-          <strong>Gemini is responding</strong>
-          <pre><code>{progress}</code></pre>
-        </div>
+        <MarkdownOutput text={progress} live />
       )}
       {error && (
         <div className="ai-error">
@@ -256,12 +235,7 @@ function Generated({
             {data.cached ? "Cached result" : "Generated now"}
           </p>
           {data.rawText && (
-            <div className="ai-live-response">
-              <strong>Gemini explanation</strong>
-              <pre>
-                <code>{data.rawText}</code>
-              </pre>
-            </div>
+            <MarkdownOutput text={data.rawText} />
           )}
           {!data.rawText && !data.unverified &&
             data.claims.map((claim, i) => (
@@ -297,7 +271,7 @@ function Generated({
               </article>
             ))}
           <div className="ai-limits">
-            <strong>What this section cannot establish</strong>
+            <strong>What this file cannot establish</strong>
             <ul>
               <li>
                 Other files and runtime behavior were not inspected by the
@@ -308,14 +282,33 @@ function Generated({
               ))}
             </ul>
           </div>
-          {data.totalLines > PAGE_LINES && (
-            <p className="metadata-note">
-              Only this section was explained. Select another section above to
-              continue.
-            </p>
-          )}
         </>
       )}
     </div>
+  );
+}
+
+function MarkdownOutput({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <section className="ai-markdown-shell" aria-label={live ? "Live Gemini response" : "Gemini explanation"}>
+      <header className="ai-markdown-bar">
+        <span className="ai-window-dots" aria-hidden="true"><i /><i /><i /></span>
+        <span>{live ? "LIVE ANALYSIS" : "ANALYSIS COMPLETE"}</span>
+        <span className={live ? "ai-stream-state live" : "ai-stream-state"}>
+          {live ? "STREAMING" : "SAVED"}
+        </span>
+      </header>
+      <div className="ai-markdown-body">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          }}
+        >
+          {text}
+        </ReactMarkdown>
+        {live && <span className="ai-cursor" aria-hidden="true" />}
+      </div>
+    </section>
   );
 }

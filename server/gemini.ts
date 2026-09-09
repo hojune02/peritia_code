@@ -107,7 +107,7 @@ export async function generateWithGemini(
       systemInstruction: { parts: [{ text: messages.system }] },
       contents: [{ role: "user", parts: [{ text: messages.user }] }],
       generationConfig: {
-        maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 1600),
+        maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 16384),
         ...(config.model.startsWith("gemini-3")
           ? { thinkingConfig: { thinkingLevel: "minimal" } }
           : {}),
@@ -137,7 +137,6 @@ export async function generateWithGemini(
       for (const part of candidate?.content?.parts || []) {
         if (typeof part.text === "string") text += part.text;
       }
-      if (text.length > 100_000) throw new Error("GEMINI_RESPONSE_TOO_LARGE");
       const metadata = chunk.usageMetadata;
       if (metadata) {
         usage.inputTokens = Math.max(usage.inputTokens, count(metadata.promptTokenCount));
@@ -152,8 +151,6 @@ export async function generateWithGemini(
   }
   if (!usage.totalTokens)
     usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.thoughtTokens;
-  if (streamError === "GEMINI_RESPONSE_TOO_LARGE")
-    throw new GeminiGenerationError(streamError, usage.totalTokens ? usage : undefined, modelVersion);
   if (!text.trim()) {
     const reason = streamError
       || (blocked ? `GEMINI_PROMPT_BLOCKED_${blocked}` : "")

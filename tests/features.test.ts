@@ -17,7 +17,7 @@ import {
 } from "../server/auth";
 import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
-import { makeCacheKey } from "../server/explanations";
+import { chunkExplanationFile, makeCacheKey } from "../server/explanations";
 import { verifyWebhook } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
@@ -62,6 +62,25 @@ test("durable cache keys cover every generation input", () => {
   assert.equal(original.length, 64);
   assert.notEqual(original, makeCacheKey({ ...input, level: "technical" }));
   assert.notEqual(original, makeCacheKey({ ...input, modelDigest: "sha256:new" }));
+});
+
+test("whole-file explanation chunks cover every line without gaps", () => {
+  const lines = Array.from({ length: 181 }, (_, index) => `line ${index + 1}`);
+  assert.deepEqual(chunkExplanationFile(lines), [
+    { first: 1, last: 80 },
+    { first: 81, last: 160 },
+    { first: 161, last: 181 },
+  ]);
+
+  const denseLines = ["a".repeat(7_000), "b".repeat(6_000), "tail"];
+  assert.deepEqual(chunkExplanationFile(denseLines), [
+    { first: 1, last: 1 },
+    { first: 2, last: 3 },
+  ]);
+  assert.throws(
+    () => chunkExplanationFile(["x".repeat(12_001)]),
+    /line that is too large/,
+  );
 });
 
 test("billing webhook verification rejects malformed and altered signatures", () => {

@@ -13,8 +13,7 @@ export type Explanation = {
   claims: ExplanationClaim[];
   limitations: string[];
 
-  // Present when the model returned usable text that did not pass
-  // structured evidence validation.
+  // Direct provider Markdown, including usable partial output.
   rawText?: string;
   unverified: boolean;
 

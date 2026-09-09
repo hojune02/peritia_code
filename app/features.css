@@ -82,6 +82,18 @@
 .ai-range {
   margin: 16px 0;
 }
+.ai-file-scope {
+  display: inline-flex;
+  margin: 14px 0 2px;
+  padding: 6px 10px;
+  border: 1px solid #bed0c2;
+  border-radius: 999px;
+  color: #355b43;
+  background: #e7f0e5;
+  font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .ai-loading {
   display: flex;
   gap: 10px;
@@ -182,6 +194,156 @@
   color: #356449;
 }
 
+.ai-markdown-shell {
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid #2f7250;
+  border-radius: 10px;
+  background: #08110d;
+  box-shadow: 0 14px 34px rgba(5, 20, 12, 0.2), inset 0 0 0 1px rgba(117, 255, 170, 0.04);
+}
+
+.ai-markdown-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #234b36;
+  color: #9db8a6;
+  background: #0d1a13;
+  font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+}
+
+.ai-window-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.ai-window-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #31533e;
+}
+
+.ai-window-dots i:first-child { background: #f06a6a; }
+.ai-window-dots i:nth-child(2) { background: #e8bd58; }
+.ai-window-dots i:nth-child(3) { background: #5fc989; }
+
+.ai-stream-state {
+  justify-self: end;
+  color: #75e5a0;
+}
+
+.ai-stream-state.live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #65ff9d;
+  box-shadow: 0 0 10px #65ff9d;
+  animation: ai-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ai-pulse {
+  50% { opacity: 0.35; }
+}
+
+.ai-markdown-body {
+  padding: clamp(18px, 3vw, 30px);
+  color: #d8e6dc;
+  font-size: 14px;
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+
+.ai-markdown-body > :first-child { margin-top: 0; }
+.ai-markdown-body > :last-child { margin-bottom: 0; }
+.ai-markdown-body h1,
+.ai-markdown-body h2,
+.ai-markdown-body h3,
+.ai-markdown-body h4 {
+  margin: 1.7em 0 0.65em;
+  color: #8df5af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+.ai-markdown-body h1 { font-size: 21px; }
+.ai-markdown-body h2 {
+  padding-bottom: 7px;
+  border-bottom: 1px solid #214a33;
+  font-size: 18px;
+}
+.ai-markdown-body h3 { font-size: 15px; }
+.ai-markdown-body p { margin: 0.7em 0; }
+.ai-markdown-body strong { color: #ffffff; }
+.ai-markdown-body a { color: #6fd9ff; text-decoration-thickness: 1px; }
+.ai-markdown-body ul,
+.ai-markdown-body ol { padding-left: 1.5rem; }
+.ai-markdown-body li { margin: 0.35em 0; }
+.ai-markdown-body blockquote {
+  margin: 1em 0;
+  padding: 0.15em 1em;
+  border-left: 3px solid #5fd58c;
+  color: #b9cbbf;
+  background: #0d1b14;
+}
+.ai-markdown-body code {
+  padding: 0.15em 0.38em;
+  border: 1px solid #28503a;
+  border-radius: 4px;
+  color: #a4f7c1;
+  background: #0c1c14;
+  font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ai-markdown-body pre {
+  margin: 1em 0;
+  padding: 16px;
+  overflow-x: auto;
+  border: 1px solid #224632;
+  border-radius: 7px;
+  background: #040a07;
+}
+.ai-markdown-body pre code {
+  padding: 0;
+  border: 0;
+  color: #d8e6dc;
+  background: transparent;
+}
+.ai-markdown-body table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.ai-markdown-body th,
+.ai-markdown-body td {
+  padding: 8px 10px;
+  border: 1px solid #28503a;
+  text-align: left;
+}
+.ai-markdown-body th { color: #8df5af; background: #0d1b14; }
+.ai-markdown-body hr { border: 0; border-top: 1px solid #28503a; margin: 2em 0; }
+
+.ai-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 1.1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: #75ff9f;
+  animation: ai-cursor 0.8s steps(1) infinite;
+}
+
+@keyframes ai-cursor {
+  50% { opacity: 0; }
+}
+
 .ai-raw-response > p,
 .ai-live-response > p {
   margin: 0 0 14px;
@@ -226,7 +388,24 @@
   .ai-panel {
     padding: 15px;
   }
+  .ai-markdown-bar {
+    grid-template-columns: auto 1fr;
+  }
+  .ai-markdown-bar > :nth-child(2) {
+    display: none;
+  }
+  .ai-markdown-body {
+    padding: 16px;
+    font-size: 13px;
+  }
   .topbar .breadcrumbs .visibility {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-stream-state.live::before,
+  .ai-cursor {
+    animation: none;
   }
 }

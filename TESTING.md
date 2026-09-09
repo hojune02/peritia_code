@@ -46,10 +46,10 @@ Install/start Ollama with cloud disabled and run `ollama pull qwen2.5-coder:7b` 
 1. Sign in. In the bundled example, select `package.json` or a small source file. The Understand panel should show a loading state, then claims with source excerpts.
 2. Expand every **Inspect evidence** item. Verify the quote and line numbers against the Source code tab. Then ask: **does this code actually support this claim?** Exact text matches alone do not establish correctness.
 3. Import your own public repository. Open a C, Python, HTML, CSS, or React source file. AI handles text regardless of whether the static JavaScript symbol extractor recognizes the language.
-4. For files over 80 lines, change the section selector. The returned line range should follow that section, with no claim to have read unseen files.
-5. Change Plain English / Technical in the guide. The next explanation should use that detail level. Reopening the same file/section/level within 30 minutes should show a cached result.
+4. For files over 80 lines, request one explanation. The live Markdown should progress through ordered line-range chunks and the final metadata should cover lines 1 through the file's last line, with no claim to have read other repository files.
+5. Change Plain English / Technical in the guide. The next explanation should use that detail level. Reopening the same file/level within 30 minutes should show the saved result.
 6. Switch files while generation is running. An old response must never appear under a new filename. The local server processes one generation at a time, so a quick switch can show a busy message; retry after the earlier generation finishes.
-7. Stop Ollama and select an **uncached** file/section. Expect an unavailable message and retry button. Static facts and source remain readable. A cached explanation can still appear while Ollama is stopped.
+7. Stop Ollama and select an **uncached** file. Expect an unavailable message and retry button. Static facts and source remain readable. A cached explanation can still appear while Ollama is stopped.
 8. Sign out and open another file. The model must not run; the panel should request sign-in.
 
 Dense/minified code, binary files, excluded filenames, and files over 64 KB are deliberately unsupported or rejected with an explanation. Missing/model-invalid results must never be represented as successful AI explanations.

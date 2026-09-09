@@ -26,7 +26,7 @@ test("one remaining credit accepts only one of ten concurrent jobs", async (t) =
     AI_MODEL_REVISION: modelRevision,
   });
   const service = new ExplanationService(pool, config);
-  const input = { repositoryId: "sample", commit: "sample", path: "src/App.tsx", page: 0, level: "beginner" } as const;
+  const input = { repositoryId: "sample", commit: "sample", path: "src/App.tsx", scope: "file", level: "beginner" } as const;
   const keys = Array.from({ length: 10 }, () => randomUUID());
   const results = await Promise.allSettled(keys.map((key) => service.submit(userId, key, input)));
   const accepted = results.filter((result) => result.status === "fulfilled");
@@ -64,14 +64,17 @@ test("one remaining credit accepts only one of ten concurrent jobs", async (t) =
   assert.deepEqual({ reserved: settled.reserved, consumed: settled.consumed }, { reserved: 0, consumed: 1 });
   const completed = await service.get(userId, acceptedResult.value.job.id);
   assert.equal(completed.status, "completed");
-  assert.equal(completed.result?.rawText, output);
+  assert.match(completed.result?.rawText ?? "", /^## Lines 1–\d+/);
+  assert.match(completed.result?.rawText ?? "", new RegExp(output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(completed.result?.startLine, 1);
+  assert.equal(completed.result?.endLine, completed.result?.totalLines);
   const metric = await pool.query(`SELECT * FROM ai_generation_usage WHERE job_id=$1`, [acceptedResult.value.job.id]);
   assert.equal(metric.rows.length, 1);
   assert.equal(metric.rows[0].provider, "gemini");
   assert.equal(metric.rows[0].model_version, "gemini-3.5-flash-lite-001");
-  assert.equal(metric.rows[0].input_tokens, 2000);
-  assert.equal(metric.rows[0].output_tokens, 400);
-  assert.equal(Number(metric.rows[0].estimated_list_cost_usd), 0.00036);
+  assert(Number(metric.rows[0].input_tokens) >= 2000);
+  assert(Number(metric.rows[0].output_tokens) >= 400);
+  assert(Number(metric.rows[0].estimated_list_cost_usd) >= 0.00036);
   assert.equal(Number(metric.rows[0].estimated_billed_cost_usd), 0);
 
   await pool.query(
