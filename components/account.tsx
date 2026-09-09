@@ -212,6 +212,10 @@ export function AccountControl() {
         body: "{}",
       });
       if (!response.ok) throw new Error("Could not sign out. Please retry.");
+      for (let index = sessionStorage.length - 1; index >= 0; index--) {
+        const key = sessionStorage.key(index);
+        if (key?.startsWith("peritia:explanation:")) sessionStorage.removeItem(key);
+      }
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not sign out.");

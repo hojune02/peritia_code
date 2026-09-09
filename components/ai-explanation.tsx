@@ -51,22 +51,63 @@ export function AIExplanation({
           Sign in for AI explanations
         </button>
       ) : (
-        <Generated
-          key={[
-            account.user.id,
-            guide.url,
-            guide.commit,
-            path,
-            page,
-            level,
-          ].join(":")}
-          guide={guide}
-          path={path}
-          page={page}
-          level={level}
-        />
+        <>
+          <UsageControl />
+          <Generated
+            key={[
+              account.user.id,
+              guide.url,
+              guide.commit,
+              path,
+              page,
+              level,
+            ].join(":")}
+            guide={guide}
+            path={path}
+            page={page}
+            level={level}
+          />
+        </>
       )}
     </section>
+  );
+}
+
+function UsageControl() {
+  const [usage, setUsage] = useState<{ plan: string; remaining: number } | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void fetch("/api/usage")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Usage is unavailable.");
+        setUsage(await response.json());
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Usage is unavailable."));
+  }, []);
+  const openBilling = async (path: "checkout" | "portal") => {
+    setError("");
+    const response = await fetch(`/api/billing/${path}`, {
+      method: path === "checkout" ? "POST" : "GET",
+      headers: path === "checkout" ? { "Content-Type": "application/json" } : undefined,
+      body: path === "checkout" ? "{}" : undefined,
+    });
+    const body = await response.json();
+    if (!response.ok || !body.url) {
+      setError(body.error || "Billing is unavailable.");
+      return;
+    }
+    location.assign(body.url);
+  };
+  return (
+    <div className="ai-range">
+      <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanations remaining` : "Loading allowance…"}</span>
+      {usage?.plan === "paid" ? (
+        <button className="small-link" onClick={() => void openBilling("portal")}>Manage subscription</button>
+      ) : (
+        <button className="small-link" onClick={() => void openBilling("checkout")}>Upgrade</button>
+      )}
+      {error && <span role="alert">{error}</span>}
+    </div>
   );
 }
 function Generated({
@@ -80,25 +121,69 @@ function Generated({
   page: number;
   level: string;
 }) {
-  const { refresh } = useAccount();
+  const { refresh, user } = useAccount();
   const [data, setData] = useState<Explanation | null>(null);
   const [error, setError] = useState(""),
-    [busy, setBusy] = useState(true),
-    [attempt, setAttempt] = useState(0);
+    [busy, setBusy] = useState(false),
+    [jobId, setJobId] = useState<string | null>(null),
+    [progress, setProgress] = useState("");
+  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:${page}:${level}`;
+
   useEffect(() => {
-    const controller = new AbortController();
+    const saved = sessionStorage.getItem(storageKey);
+    setJobId(saved);
+    setData(null);
+    setProgress("");
+    setError("");
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!jobId) return;
     let live = true;
+    setBusy(true);
+    const events = new EventSource(`/api/explanations/${jobId}/events`);
+    const apply = (event: MessageEvent) => {
+      if (!live) return;
+      const snapshot = JSON.parse(event.data);
+      setProgress(snapshot.text || "");
+      if (snapshot.result) setData(snapshot.result);
+      if (snapshot.status === "completed") {
+        setBusy(false);
+        events.close();
+      } else if (snapshot.status === "failed") {
+        setBusy(false);
+        setError("The explanation failed and its reserved credit was restored.");
+        events.close();
+      }
+    };
+    events.addEventListener("snapshot", apply as EventListener);
+    events.addEventListener("complete", apply as EventListener);
+    events.addEventListener("failed", apply as EventListener);
+    events.onerror = () => {
+      if (live && events.readyState === EventSource.CLOSED) {
+        setBusy(false);
+        setError("The live connection closed. Reopen this file to reconnect.");
+      }
+    };
+    return () => { live = false; events.close(); };
+  }, [jobId]);
+
+  const generate = () => {
+    const controller = new AbortController();
     setBusy(true);
     setError("");
     setData(null);
-    const timeout = setTimeout(() => controller.abort(), 135000);
+    setProgress("");
     void (async () => {
       try {
-        const response = await fetch("/api/explain", {
+        const response = await fetch("/api/explanations", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
           body: JSON.stringify({
-            repo: guide.sample ? "sample" : guide.url,
+            repositoryId: guide.sample ? "sample" : guide.url,
             commit: guide.commit,
             path,
             page,
@@ -107,37 +192,40 @@ function Generated({
           signal: controller.signal,
         });
         const result = await response.json();
-        if (!live) return;
         if (response.status === 401) void refresh();
         if (!response.ok)
           throw new Error(result.error || "Explanation failed.");
-        setData(result);
+        sessionStorage.setItem(storageKey, result.jobId);
+        setJobId(result.jobId);
+        if (result.result) setData(result.result);
       } catch (e) {
-        if (live)
-          setError(
-            e instanceof Error && e.name !== "AbortError"
-              ? e.message
-              : "The local model took too long. Try again after it finishes loading.",
-          );
+        setBusy(false);
+        setError(e instanceof Error ? e.message : "Explanation failed.");
       } finally {
-        clearTimeout(timeout);
-        if (live) setBusy(false);
+        if (!jobId) setBusy(false);
       }
     })();
-    return () => {
-      live = false;
-      controller.abort();
-      clearTimeout(timeout);
-    };
-  }, [guide.url, guide.commit, guide.sample, path, page, level, attempt]);
+  };
   return (
     <div aria-live="polite">
+      {!jobId && !busy && (
+        <button className="primary-button" onClick={generate}>
+          Explain this section
+        </button>
+      )}
       {busy && (
         <p className="ai-loading" role="status">
           <Loader2 size={18} className="spin" />
-          Reading this section with the local model… The first run may take up
-          to two minutes.
+          {progress
+            ? "Generating… progress is saved if you leave this tab."
+            : "Queued for the local model… You can keep browsing."}
         </p>
+      )}
+      {busy && progress && (
+        <details className="ai-raw-response">
+          <summary>Show generation progress</summary>
+          <pre><code>{progress}</code></pre>
+        </details>
       )}
       {error && (
         <div className="ai-error">
@@ -145,7 +233,11 @@ function Generated({
           <p>File facts and source code below are still available.</p>
           <button
             className="secondary-button"
-            onClick={() => setAttempt((a) => a + 1)}
+            onClick={() => {
+              sessionStorage.removeItem(storageKey);
+              setJobId(null);
+              generate();
+            }}
           >
             Retry explanation
           </button>

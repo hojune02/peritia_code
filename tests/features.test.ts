@@ -17,6 +17,9 @@ import {
 } from "../server/auth";
 import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
+import { makeCacheKey } from "../server/explanations";
+import { verifyWebhook } from "../server/billing";
+import { createHmac } from "node:crypto";
 
 const config = getConfig({
   APP_ORIGIN: "http://localhost:5173",
@@ -45,6 +48,29 @@ const input = {
   level: "beginner",
 };
 const nativeFetch = globalThis.fetch;
+
+test("durable cache keys cover every generation input", () => {
+  const input = {
+    repositoryId: "1", commit: "a".repeat(40), path: "a.ts",
+    startLine: 1, endLine: 80, contentHash: "b".repeat(64),
+    contextHash: "c".repeat(64), level: "beginner",
+    modelDigest: "sha256:model", promptVersion: "v1",
+    options: { temperature: 0, num_ctx: 8192 },
+  };
+  const original = makeCacheKey(input);
+  assert.equal(original.length, 64);
+  assert.notEqual(original, makeCacheKey({ ...input, level: "technical" }));
+  assert.notEqual(original, makeCacheKey({ ...input, modelDigest: "sha256:new" }));
+});
+
+test("billing webhook verification rejects malformed and altered signatures", () => {
+  const body = Buffer.from('{"event":"subscription_created"}');
+  const secret = "test-webhook-secret";
+  const signature = createHmac("sha256", secret).update(body).digest("hex");
+  assert.equal(verifyWebhook(body, signature, secret), true);
+  assert.equal(verifyWebhook(Buffer.from(body + "x"), signature, secret), false);
+  assert.equal(verifyWebhook(body, "not-hex", secret), false);
+});
 async function fixture(
   t: TestContext,
   options: {
