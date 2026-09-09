@@ -1,0 +1,219 @@
+.account-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.account-email {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: #52645d;
+}
+.account-dialog {
+  max-width: 460px;
+  background: #fafbf8;
+}
+.account-form {
+  display: grid;
+  gap: 16px;
+}
+.account-form label,
+.ai-range {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.account-form input,
+.ai-range select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #ccd7ce;
+  border-radius: 7px;
+  background: #fff;
+  color: #172e23;
+}
+.account-form small {
+  color: #64736a;
+}
+.account-form .primary-button {
+  justify-content: center;
+}
+.account-divider {
+  text-align: center;
+  color: #7d897f;
+  font-size: 12px;
+}
+.google-signin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 11px;
+  border: 1px solid #cbd1ca;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+.google-signin span {
+  font-family: Arial, sans-serif;
+  font-size: 20px;
+  font-weight: bold;
+  color: #4285f4;
+}
+.ai-panel {
+  padding: 22px;
+  border: 1px solid #c9d9cd;
+  background: #f3f8f1;
+  border-radius: 12px;
+  margin: 0 0 28px;
+}
+.ai-panel > .mini-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ai-panel h3 {
+  font-size: 22px;
+  margin: 14px 0 8px;
+}
+.ai-range {
+  margin: 16px 0;
+}
+.ai-loading {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 15px 0;
+  color: #466250;
+}
+.ai-loading svg {
+  flex-shrink: 0;
+}
+.ai-error {
+  padding: 15px;
+  background: #fff8ed;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.ai-error p {
+  margin: 0 0 12px;
+}
+.ai-claim {
+  border-top: 1px solid #d5e1d4;
+  padding: 18px 0;
+}
+.claim-kind {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #356449;
+}
+.claim-kind.inference {
+  color: #876018;
+}
+.ai-claim p {
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 7px 0;
+}
+.ai-claim details {
+  font-size: 12px;
+}
+.ai-claim summary {
+  cursor: pointer;
+  color: #42644c;
+}
+.ai-claim pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #172d23;
+  color: #e4eee6;
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.ai-limits {
+  font-size: 12px;
+  padding: 14px;
+  background: #e7eee4;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+.ai-limits ul {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 6px 0 0;
+}
+.account-dialog .metadata-note svg {
+  display: inline;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.ai-raw-response {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #e1bd72;
+  border-radius: 8px;
+  background: #fff8e8;
+}
+
+.ai-raw-response > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #77530e;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ai-raw-response > p {
+  margin: 0 0 14px;
+  color: #6b5934;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-raw-response pre {
+  max-height: 480px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  background: #172d23;
+  color: #e4eee6;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.source-notebook-panel[data-state="inactive"] {
+  display: none !important;
+}
+
+.source-notebook-panel[data-state="active"] {
+  display: block;
+}
+@media (max-width: 760px) {
+  .account-email {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 6px;
+  }
+  .account-control .export-button {
+    font-size: 11px;
+    padding: 8px;
+  }
+  .ai-panel {
+    padding: 15px;
+  }
+  .topbar .breadcrumbs .visibility {
+    display: none;
+  }
+}

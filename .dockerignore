@@ -1,0 +1,12 @@
+node_modules
+dist
+.dev
+.test-build
+.git
+.env
+.env.*
+data
+*.sqlite*
+*.log
+ai-evaluation.json
+cookies.txt
