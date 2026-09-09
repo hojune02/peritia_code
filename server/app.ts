@@ -4,11 +4,11 @@ import { RepoError } from "../lib/repository";
 import { createAuth, limiter, sameOrigin, verifyGoogleToken } from "./auth";
 import { createExplainer } from "./ai";
 import type { Config } from "./config";
-import { Store } from "./store";
+import type { AuthStore } from "./auth-store";
 
 export function createApp(
   config: Config,
-  store: Store,
+  store: AuthStore,
   dependencies: {
     explain?: ReturnType<typeof createExplainer>;
     googleVerify?: typeof verifyGoogleToken;

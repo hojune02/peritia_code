@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createApp } from "./app";
 import { getConfig } from "./config";
-import { Store } from "./store";
+import { PostgresStore } from "./postgres-store"
 
 const config = getConfig();
-const store = new Store(config.database);
+const store = new PostgresStore();
 const app = createApp(config, store);
 
 // One origin for both the React frontend and Express API.

@@ -3,13 +3,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
-export type User = {
-  id: string;
-  email: string;
-  password: string | null;
-  google_sub: string | null;
-};
-export class Store {
+import { AuthStore, User } from "./auth-store";
+export class Store implements AuthStore {
   db: DatabaseSync;
   constructor(path: string) {
     if (path !== ":memory:")
