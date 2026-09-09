@@ -10,11 +10,15 @@
     "setup": "node scripts/setup.mjs",
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "build": "npm run typecheck && vite build && node scripts/build-server.mjs",
-    "start": "node --env-file-if-exists=.env dist/server/index.mjs",
-    "test": "node scripts/test-core.mjs",
+    "start": "npm run start:api",
+    "start:api": "node --env-file-if-exists=.env dist/server/api.mjs",
+    "start:worker": "node --env-file-if-exists=.env dist/server/worker.mjs",
+    "test": "GITHUB_CACHE_MODE=memory node scripts/test-core.mjs",
+    "test:integration": "node --env-file-if-exists=.env scripts/test-integration.mjs",
     "test:ai": "node --env-file-if-exists=.env scripts/evaluate-ai.mjs",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node --env-file-if-exists=.env scripts/migrate-postgres.mjs"
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate-postgres.mjs",
+    "staging:grant": "node --env-file-if-exists=.env scripts/grant-staging-credits.mjs"
   },
   "dependencies": {
     "bullmq": "^6.3.4",

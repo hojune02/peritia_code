@@ -1,11 +1,15 @@
 import { build } from "esbuild";
 await build({
-  entryPoints: ["server/index.ts"],
+  entryPoints: {
+    api: "server/index.ts",
+    worker: "server/worker.ts",
+  },
   bundle: true,
   packages: "external",
   platform: "node",
   format: "esm",
   target: "node22",
-  outfile: "dist/server/index.mjs",
+  outdir: "dist/server",
+  outExtension: { ".js": ".mjs" },
   sourcemap: true,
 });
