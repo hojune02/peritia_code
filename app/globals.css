@@ -64,6 +64,66 @@
   --font-sans: Arial, Helvetica, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
+
+/* Quiet, theme-aware scrollbars across the application. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #9caf9f transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #9caf9f;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #748c7a;
+  background-clip: padding-box;
+}
+
+.peritia-sidebar,
+.peritia-sidebar *,
+.source-code-pane,
+.source-code-pane *,
+.ai-markdown-shell,
+.ai-markdown-shell * {
+  scrollbar-color: #3c694f #08110d;
+}
+.peritia-sidebar::-webkit-scrollbar-track,
+.peritia-sidebar *::-webkit-scrollbar-track,
+.source-code-pane::-webkit-scrollbar-track,
+.source-code-pane *::-webkit-scrollbar-track,
+.ai-markdown-shell::-webkit-scrollbar-track,
+.ai-markdown-shell *::-webkit-scrollbar-track {
+  background: #08110d;
+}
+.peritia-sidebar::-webkit-scrollbar-thumb,
+.peritia-sidebar *::-webkit-scrollbar-thumb,
+.source-code-pane::-webkit-scrollbar-thumb,
+.source-code-pane *::-webkit-scrollbar-thumb,
+.ai-markdown-shell::-webkit-scrollbar-thumb,
+.ai-markdown-shell *::-webkit-scrollbar-thumb {
+  border-color: #08110d;
+  background: #3c694f;
+  background-clip: padding-box;
+}
+.peritia-sidebar::-webkit-scrollbar-thumb:hover,
+.peritia-sidebar *::-webkit-scrollbar-thumb:hover,
+.source-code-pane::-webkit-scrollbar-thumb:hover,
+.source-code-pane *::-webkit-scrollbar-thumb:hover,
+.ai-markdown-shell::-webkit-scrollbar-thumb:hover,
+.ai-markdown-shell *::-webkit-scrollbar-thumb:hover {
+  background: #5a8d6d;
+  background-clip: padding-box;
+}
 * {
   box-sizing: border-box;
 }
@@ -1589,7 +1649,7 @@ h1 {
 }
 .source-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(520px, 740px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -1717,7 +1777,8 @@ h1 {
   background: #08110d !important;
   color: #d8e6dc;
   font: 14px/1.85 var(--font-mono);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px 0 28px;
   tab-size: 2;
 }
@@ -1727,7 +1788,7 @@ h1 {
 }
 .code-line {
   display: flex;
-  width: max-content;
+  width: 100%;
   min-width: 100%;
   min-height: 1.85em;
   padding-right: 24px;
@@ -1736,7 +1797,9 @@ h1 {
   background: rgba(117, 255, 159, 0.045);
 }
 .code-line-content {
-  white-space: pre;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .line-number {
   width: 54px;
