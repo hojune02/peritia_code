@@ -53,6 +53,7 @@ Install/start Ollama with cloud disabled and run `ollama pull qwen2.5-coder:7b` 
 8. Sign out and open another file. The model must not run; the panel should request sign-in.
 9. Import different repositories as two accounts. Hard-refresh and switch accounts. Each account should see only its own repository list and reviewed-file progress; the most recently opened repository should restore automatically.
 10. Open TypeScript, Python, JSON, and an unknown-extension file. On desktop, source and explanation should appear side by side; on a narrow viewport, tabs should switch between them. Confirm syntax colors change by language while whitespace and line numbers still match GitHub exactly.
+11. Switch repeatedly between saved repositories. The list should remain visible and in the same order while the next guide loads. Delete one repository, cancel once, then confirm: only that account's saved import and reviewed-file progress should disappear; the GitHub repository and another account's saved import must remain untouched.
 
 Dense/minified code, binary files, excluded filenames, and files over 64 KB are deliberately unsupported or rejected with an explanation. Missing/model-invalid results must never be represented as successful AI explanations.
 

@@ -236,12 +236,18 @@ async function fixture(
       headers: { "Content-Type": "application/json", Origin: origin, Cookie: token },
       body: JSON.stringify(body),
     });
+  const del = (path: string, token = "") =>
+    nativeFetch(url + path, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Origin: origin, Cookie: token },
+      body: "{}",
+    });
   const register = async (email = "person@example.com") => {
     const response = await post("/api/auth/register", { email, password });
     assert.equal(response.status, 201);
     return response.headers.get("set-cookie")!.split(";")[0];
   };
-  return { store, post, put, get, register, count: () => explanations };
+  return { store, post, put, del, get, register, count: () => explanations };
 }
 
 test("passwords are salted, hashed, and checked; bounds prevent oversized KDF input", async () => {
@@ -314,6 +320,7 @@ test("repository library endpoints use the authenticated account identity", asyn
   const listed: string[] = [];
   const opened: string[] = [];
   const reviewed: string[] = [];
+  const removed: string[] = [];
   const repositories: RepositoryEndpoints = {
     save: async () => undefined,
     list: async (userId) => {
@@ -323,6 +330,10 @@ test("repository library endpoints use the authenticated account identity", asyn
     open: async (userId) => {
       opened.push(userId);
       return { guide: demoGuide, reviewedPaths: [] };
+    },
+    remove: async (userId) => {
+      removed.push(userId);
+      return { ok: true };
     },
     setReviewed: async (userId) => {
       reviewed.push(userId);
@@ -338,6 +349,8 @@ test("repository library endpoints use the authenticated account identity", asyn
   assert.equal((await f.get("/api/repositories", firstCookie)).status, 200);
   assert.equal((await f.get("/api/repositories", secondCookie)).status, 200);
   assert.equal((await f.get("/api/repositories/123", firstCookie)).status, 200);
+  assert.equal((await f.del("/api/repositories/123")).status, 401);
+  assert.equal((await f.del("/api/repositories/123", firstCookie)).status, 200);
   assert.equal((await f.put("/api/repositories/files/reviewed", {
     repo: "https://github.com/example/repo",
     commit: "a".repeat(40),
@@ -346,6 +359,7 @@ test("repository library endpoints use the authenticated account identity", asyn
   }, secondCookie)).status, 200);
   assert.deepEqual(listed, [first.user.id, second.user.id]);
   assert.deepEqual(opened, [first.user.id]);
+  assert.deepEqual(removed, [first.user.id]);
   assert.deepEqual(reviewed, [second.user.id]);
 });
 test("JWT: unsigned, tampered, expired, wrong-audience, wrong-issuer tokens are rejected", async (t) => {

@@ -283,14 +283,13 @@ code {
 }
 .saved-repository {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
   width: 100%;
-  padding: 9px 8px;
   border-radius: 6px;
   color: #b9cbbf;
   text-align: left;
+  overflow: hidden;
 }
 .saved-repository:hover,
 .saved-repository.active {
@@ -300,11 +299,21 @@ code {
 .saved-repository.active {
   box-shadow: inset 2px 0 #b4d190;
 }
-.saved-repository > span {
+.saved-repository-open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 5px 9px 8px;
+  color: inherit;
+  text-align: left;
+}
+.saved-repository-open > span {
   min-width: 0;
 }
 .saved-repository strong,
-.saved-repository span small {
+.saved-repository-open span small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -318,6 +327,32 @@ code {
 .saved-repository small {
   color: #91a79a;
   font-size: 10px;
+}
+.saved-repository-delete {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  margin-right: 3px;
+  border-radius: 5px;
+  color: #91a79a;
+  opacity: 0;
+  transition: color 140ms ease, background 140ms ease, opacity 140ms ease;
+}
+.saved-repository:hover .saved-repository-delete,
+.saved-repository-delete:focus-visible,
+.saved-repository-delete:disabled {
+  opacity: 1;
+}
+.saved-repository-delete:hover {
+  color: #ffd8ce;
+  background: #694035;
+}
+.saved-repository-delete:disabled {
+  cursor: wait;
+}
+@media (hover: none) {
+  .saved-repository-delete { opacity: 1; }
 }
 .saved-repositories-note {
   padding: 2px 8px;

@@ -9,7 +9,7 @@ import type { ExplanationService } from "./explanations";
 import type { BillingService } from "./billing";
 import type { RepositoryLibrary } from "./repositories";
 
-export type RepositoryEndpoints = Pick<RepositoryLibrary, "save" | "list" | "open" | "setReviewed">;
+export type RepositoryEndpoints = Pick<RepositoryLibrary, "save" | "list" | "open" | "remove" | "setReviewed">;
 
 export function createApp(
   config: Config,
@@ -54,6 +54,14 @@ export function createApp(
     app.get("/api/repositories/:repositoryId", auth.required, async (req, res) => {
       res.json(await repositories.open(res.locals.user.id, req.params.repositoryId));
     });
+    app.delete(
+      "/api/repositories/:repositoryId",
+      auth.required,
+      limiter(100, 60 * 60 * 1000, (_req, res) => res.locals.user.id),
+      async (req, res) => {
+        res.json(await repositories.remove(res.locals.user.id, req.params.repositoryId));
+      },
+    );
     app.put(
       "/api/repositories/files/reviewed",
       auth.required,

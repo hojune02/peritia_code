@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   X,
   Info,
 } from "lucide-react";
@@ -119,6 +120,8 @@ function RepoNavigation({
   repositoriesLoading,
   signedIn,
   onRepository,
+  deletingRepositoryId,
+  onDeleteRepository,
 }: {
   guide: Guide;
   section: Section;
@@ -129,6 +132,8 @@ function RepoNavigation({
   repositoriesLoading: boolean;
   signedIn: boolean;
   onRepository: (repository: SavedRepository) => void;
+  deletingRepositoryId: string | null;
+  onDeleteRepository: (repository: SavedRepository) => void;
 }) {
   const { setOpenMobile } = useSidebar();
   return (
@@ -164,7 +169,7 @@ function RepoNavigation({
           ) : repositories.length ? (
             <div className="saved-repository-list">
               {repositories.map((repository) => (
-                <button
+                <div
                   key={repository.repositoryId}
                   className={
                     !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
@@ -172,18 +177,39 @@ function RepoNavigation({
                       ? "saved-repository active"
                       : "saved-repository"
                   }
-                  onClick={() => {
-                    onRepository(repository);
-                    setOpenMobile(false);
-                  }}
                   title={`${repository.owner}/${repository.name}`}
                 >
-                  <Github size={14} />
-                  <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
-                  <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
-                    {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
-                  </small>
-                </button>
+                  <button
+                    className="saved-repository-open"
+                    onClick={() => {
+                      onRepository(repository);
+                      setOpenMobile(false);
+                    }}
+                    aria-current={
+                      !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                        && guide.name.toLowerCase() === repository.name.toLowerCase()
+                        ? "page"
+                        : undefined
+                    }
+                  >
+                    <Github size={14} />
+                    <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
+                    <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
+                      {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
+                    </small>
+                  </button>
+                  <button
+                    className="saved-repository-delete"
+                    onClick={() => onDeleteRepository(repository)}
+                    disabled={deletingRepositoryId === repository.repositoryId}
+                    aria-label={`Delete ${repository.owner}/${repository.name} from your repositories`}
+                    title="Delete saved repository"
+                  >
+                    {deletingRepositoryId === repository.repositoryId
+                      ? <Loader2 size={14} className="spin" />
+                      : <Trash2 size={14} />}
+                  </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -439,6 +465,7 @@ export default function Home() {
   const [copyState, setCopyState] = useState(false);
   const [repositories, setRepositories] = useState<SavedRepository[]>([]);
   const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+  const [deletingRepositoryId, setDeletingRepositoryId] = useState<string | null>(null);
   const [repositoryError, setRepositoryError] = useState("");
 
   const [sourceTab, setSourceTab] = useState<"explanation" | "source">(
@@ -459,7 +486,6 @@ export default function Home() {
     setSection("overview");
   };
   const openSavedRepository = async (repository: SavedRepository, request = ++libraryRequest.current) => {
-    setRepositoriesLoading(true);
     setRepositoryError("");
     try {
       const response = await fetch(`/api/repositories/${encodeURIComponent(repository.repositoryId)}`);
@@ -467,16 +493,41 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error || "Could not restore this repository.");
       if (request === libraryRequest.current) {
         showGuide(data.guide, Array.isArray(data.reviewedPaths) ? data.reviewedPaths : []);
-        setRepositories((current) => [
-          repository,
-          ...current.filter((item) => item.repositoryId !== repository.repositoryId),
-        ]);
       }
     } catch (reason) {
       if (request === libraryRequest.current)
         setRepositoryError(reason instanceof Error ? reason.message : "Could not restore this repository.");
+    }
+  };
+  const deleteSavedRepository = async (repository: SavedRepository) => {
+    const confirmed = window.confirm(
+      `Delete ${repository.owner}/${repository.name} from your Peritia repositories?\n\nThis removes your saved import and reading progress. It does not delete the GitHub repository.`,
+    );
+    if (!confirmed) return;
+    const request = ++libraryRequest.current;
+    setDeletingRepositoryId(repository.repositoryId);
+    setRepositoryError("");
+    try {
+      const response = await fetch(`/api/repositories/${encodeURIComponent(repository.repositoryId)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not delete this repository.");
+      const remaining = repositories.filter((item) => item.repositoryId !== repository.repositoryId);
+      setRepositories(remaining);
+      const deletingCurrent = !guide.sample
+        && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+        && guide.name.toLowerCase() === repository.name.toLowerCase();
+      if (deletingCurrent && request === libraryRequest.current) {
+        if (remaining[0]) await openSavedRepository(remaining[0], request);
+        else showGuide(demoGuide);
+      }
+    } catch (reason) {
+      setRepositoryError(reason instanceof Error ? reason.message : "Could not delete this repository.");
     } finally {
-      if (request === libraryRequest.current) setRepositoriesLoading(false);
+      setDeletingRepositoryId(null);
     }
   };
   const refreshRepositories = async () => {
@@ -492,6 +543,7 @@ export default function Home() {
     const request = ++libraryRequest.current;
     showGuide(demoGuide);
     setRepositories([]);
+    setDeletingRepositoryId(null);
     setRepositoryError("");
     if (!account.ready || !account.user) {
       setRepositoriesLoading(false);
@@ -505,8 +557,8 @@ export default function Home() {
         const saved = Array.isArray(data.repositories) ? data.repositories as SavedRepository[] : [];
         if (request !== libraryRequest.current) return;
         setRepositories(saved);
-        if (saved[0]) return openSavedRepository(saved[0], request);
         setRepositoriesLoading(false);
+        if (saved[0]) return openSavedRepository(saved[0], request);
       })
       .catch((reason) => {
         if (request === libraryRequest.current) {
@@ -700,6 +752,8 @@ export default function Home() {
         repositoriesLoading={repositoriesLoading}
         signedIn={!!account.user}
         onRepository={(repository) => void openSavedRepository(repository)}
+        deletingRepositoryId={deletingRepositoryId}
+        onDeleteRepository={(repository) => void deleteSavedRepository(repository)}
       />
       <div className="workspace">
         <header className="topbar">

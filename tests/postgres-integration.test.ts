@@ -162,4 +162,17 @@ test("saved repositories and reviewed files are isolated by user", async (t) => 
   assert.equal(restored.guide.name, "one");
   assert.deepEqual(restored.reviewedPaths, ["src/main.ts"]);
   assert.deepEqual((await library.open(secondUser, secondRepository)).reviewedPaths, []);
+  await assert.rejects(library.remove(secondUser, firstRepository), (error: any) => error?.status === 404);
+  assert.deepEqual(await library.remove(firstUser, firstRepository), { ok: true });
+  assert.deepEqual(await library.list(firstUser), []);
+  assert.deepEqual((await library.list(secondUser)).map((item) => item.name), ["two"]);
+  const reviewedAfterDelete = await pool.query(
+    `SELECT 1 FROM user_reviewed_files WHERE user_id=$1 AND repository_id=$2`,
+    [firstUser, firstRepository],
+  );
+  assert.equal(reviewedAfterDelete.rows.length, 0);
+  assert.equal(
+    Number((await pool.query(`SELECT COUNT(*) FROM repo_snapshots WHERE repository_id=$1`, [firstRepository])).rows[0].count),
+    1,
+  );
 });

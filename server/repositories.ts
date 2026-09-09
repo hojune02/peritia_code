@@ -145,6 +145,18 @@ export class RepositoryLibrary {
     return { guide, reviewedPaths: reviewed.rows.map((item) => item.path) };
   }
 
+  async remove(userId: string, rawRepositoryId: unknown) {
+    const id = repositoryId(rawRepositoryId);
+    const result = await this.pool.query<{ repository_id: string }>(
+      `DELETE FROM user_repositories
+       WHERE user_id=$1 AND repository_id=$2
+       RETURNING repository_id`,
+      [userId, id],
+    );
+    if (!result.rows[0]) throw new RepoError("Saved repository not found.", 404);
+    return { ok: true };
+  }
+
   async setReviewed(userId: string, input: { repo?: unknown; commit?: unknown; path?: unknown; reviewed?: unknown }) {
     const { owner, name } = parseRepo(input.repo);
     const commit = validateCommit(input.commit);
