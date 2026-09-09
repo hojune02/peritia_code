@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -62,7 +64,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoGuide } from "@/lib/demo";
 import { AccountControl, useAccount } from "@/components/account";
 import { AIExplanation } from "@/components/ai-explanation";
@@ -75,6 +77,9 @@ import {
   type SavedRepository,
   type Tech,
 } from "@/lib/repository";
+import { detectSourceLanguage } from "@/lib/source-language";
+
+const SourceCodeViewer = lazy(() => import("@/components/source-code-viewer"));
 
 type Section = "overview" | "architecture" | "files" | "technology" | "start";
 const sections = [
@@ -1425,22 +1430,47 @@ export default function Home() {
                 : `Pinned to commit ${guide.commit.slice(0, 7)}`}
             </SheetDescription>
           </SheetHeader>
-          <Tabs
-            value={sourceTab}
-            onValueChange={(value) =>
-              setSourceTab(value as "explanation" | "source")
-            }
-            className="source-tabs"
-          >
-            <TabsList>
-              <TabsTrigger value="explanation">Understand</TabsTrigger>
-              <TabsTrigger value="source">Source code</TabsTrigger>
-            </TabsList>
-            <TabsContent
-              value="explanation"
-              forceMount
-              className="source-tab-panel"
-            >
+          <div className="source-mobile-tabs" role="tablist" aria-label="Source notebook view">
+            <button role="tab" aria-selected={sourceTab === "source"} onClick={() => setSourceTab("source")}>Source code</button>
+            <button role="tab" aria-selected={sourceTab === "explanation"} onClick={() => setSourceTab("explanation")}>Understand</button>
+          </div>
+          <div className="source-workspace">
+            <section className="source-code-pane" data-mobile-active={sourceTab === "source"} aria-label="Source code">
+              <div className="source-toolbar">
+                <span>{sourcePath ? detectSourceLanguage(sourcePath).label : "Source"}</span>
+                <button
+                  className="small-link"
+                  disabled={!sourceContent}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(sourceContent);
+                      setCopyState(true);
+                    } catch {
+                      setCopyState(false);
+                      setSourceError("Clipboard isn't available. Select the source text to copy it.");
+                    }
+                  }}
+                >
+                  {copyState ? <><Check size={14} />Copied</> : "Copy source"}
+                </button>
+              </div>
+              {sourceLoading ? (
+                <p className="source-pane-status" role="status"><Loader2 className="spin" size={18} /> Loading source…</p>
+              ) : sourceContent ? (
+                <Suspense fallback={<pre className="source-code source-code-fallback"><code>{sourceContent}</code></pre>}>
+                  <SourceCodeViewer path={sourcePath || ""} code={sourceContent} />
+                </Suspense>
+              ) : (
+                <p className="source-pane-status">Source is unavailable.</p>
+              )}
+              {sourceError && <p role="alert" className="source-pane-error">{sourceError}</p>}
+              {!guide.sample && sourcePath && (
+                <a className="source-original" href={sourceUrl(guide, sourcePath)} target="_blank" rel="noreferrer">
+                  Open original on GitHub <ExternalLink size={15} />
+                </a>
+              )}
+            </section>
+            <section className="source-insight-pane" data-mobile-active={sourceTab === "explanation"} aria-label="Code explanation">
               <div className="source-explanation">
                 {sourcePath && !sourceLoading && !sourceError && (
                   <AIExplanation
@@ -1549,73 +1579,8 @@ export default function Home() {
                   </>
                 )}
               </div>
-            </TabsContent>
-            <TabsContent value="source" forceMount className="source-tab-panel">
-              <div className="source-toolbar">
-                <span>{sourcePath?.split(".").pop()?.toUpperCase()}</span>
-                <button
-                  className="small-link"
-                  disabled={!sourceContent}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(sourceContent);
-                      setCopyState(true);
-                    } catch {
-                      setCopyState(false);
-                      setSourceError(
-                        "Clipboard isn't available. Select the source text to copy it.",
-                      );
-                    }
-                  }}
-                >
-                  {copyState ? (
-                    <>
-                      <Check size={14} />
-                      Copied
-                    </>
-                  ) : (
-                    "Copy source"
-                  )}
-                </button>
-              </div>
-              {sourceLoading ? (
-                <p className="notice" role="status">
-                  Loading source…
-                </p>
-              ) : (
-                <>
-                  <pre className="source-code">
-                    <code>
-                      {sourceContent.split("\n").map((line, i) => (
-                        <span className="code-line" key={i}>
-                          <span className="line-number" aria-hidden="true">
-                            {i + 1}
-                          </span>
-                          <span>{line || " "}</span>
-                        </span>
-                      ))}
-                    </code>
-                  </pre>
-                  {sourceError && (
-                    <p role="alert" className="error-message">
-                      {sourceError}
-                    </p>
-                  )}
-                </>
-              )}
-            </TabsContent>
-          </Tabs>
-          {!guide.sample && sourcePath && (
-            <a
-              className="source-original"
-              href={sourceUrl(guide, sourcePath)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open original on GitHub
-              <ExternalLink size={15} />
-            </a>
-          )}
+            </section>
+          </div>
         </SheetContent>
       </Sheet>
     </SidebarProvider>

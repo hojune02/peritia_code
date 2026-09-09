@@ -376,13 +376,6 @@
   line-height: 1.6;
 }
 
-.source-notebook-panel[data-state="inactive"] {
-  display: none !important;
-}
-
-.source-notebook-panel[data-state="active"] {
-  display: block;
-}
 @media (max-width: 760px) {
   .account-email {
     display: none;

@@ -43,6 +43,7 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
 - Signed-in users get an isolated repository library. Per-user rows link to shared immutable GitHub snapshots instead of duplicating trees or source content; only the lightweight list loads initially, and a guide/source loads when opened.
+- Opening a source file uses a desktop split view: exact commit-pinned source with language-aware syntax highlighting on the left and the explanation notebook on the right. Narrow screens retain tabs, and the syntax engine is loaded only when the viewer opens.
 - One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
 - Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
