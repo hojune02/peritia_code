@@ -367,6 +367,7 @@ test("repository library endpoints use the authenticated account identity", asyn
 });
 test("billing checkout requires authentication, validates purchase type, and uses account identity", async (t) => {
   const purchases: Array<{ userId: string; kind: string }> = [];
+  const cancellations: string[] = [];
   const billing = {
     webhook: (_req: any, res: any) => res.json({ accepted: true }),
     checkout: async (user: { id: string }, kind: string) => {
@@ -374,15 +375,22 @@ test("billing checkout requires authentication, validates purchase type, and use
       return { url: "https://example.lemonsqueezy.com/checkout" };
     },
     portal: async () => ({ url: "https://example.lemonsqueezy.com/billing" }),
+    cancel: async (userId: string) => {
+      cancellations.push(userId);
+      return { status: "cancelled", endsAt: "2030-01-01T00:00:00.000Z" };
+    },
   } as unknown as BillingService;
   const f = await fixture(t, { billing });
   const cookie = await f.register("billing@example.com");
   const session = await (await f.get("/api/auth/session", cookie)).json();
   assert.equal((await f.post("/api/billing/checkout", { kind: "subscription" })).status, 401);
+  assert.equal((await f.post("/api/billing/cancel", {})).status, 401);
   assert.equal((await f.post("/api/billing/checkout", { kind: "credits" }, cookie)).status, 400);
   const response = await f.post("/api/billing/checkout", { kind: "topup" }, cookie);
   assert.equal(response.status, 200);
   assert.deepEqual(purchases, [{ userId: session.user.id, kind: "topup" }]);
+  assert.equal((await f.post("/api/billing/cancel", {}, cookie)).status, 200);
+  assert.deepEqual(cancellations, [session.user.id]);
 });
 test("JWT: unsigned, tampered, expired, wrong-audience, wrong-issuer tokens are rejected", async (t) => {
   const f = await fixture(t);

@@ -234,6 +234,64 @@ export class BillingService {
     return { url };
   }
 
+  async cancel(userId: string) {
+    const found = await this.pool.query(
+      `SELECT provider_subscription_id,status,paid_through
+       FROM billing_subscriptions WHERE user_id=$1`,
+      [userId],
+    );
+    const subscription = found.rows[0];
+    if (!subscription?.provider_subscription_id)
+      throw new RepoError("No subscription is available to cancel.", 404);
+    if (subscription.status === "cancelled") {
+      return {
+        status: "cancelled",
+        endsAt: subscription.paid_through
+          ? new Date(subscription.paid_through).toISOString()
+          : null,
+      };
+    }
+    const id = String(subscription.provider_subscription_id);
+    const response = await fetch(
+      `https://api.lemonsqueezy.com/v1/subscriptions/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${this.options.apiKey}`,
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/vnd.api+json",
+        },
+      },
+    );
+    const body: any = await response.json().catch(() => null);
+    const attributes = body?.data?.attributes;
+    if (!response.ok || !attributes)
+      throw new RepoError("The subscription could not be cancelled.", 502);
+    if (
+      String(attributes.store_id) !== this.options.storeId
+      || String(attributes.variant_id) !== this.options.proVariantId
+      || Boolean(attributes.test_mode) !== this.options.testMode
+    ) throw new RepoError("The subscription response did not match this store.", 502);
+    const updatedAt = eventDate(attributes.updated_at);
+    const paidThrough = attributes.ends_at || attributes.renews_at || subscription.paid_through;
+    await this.pool.query(
+      `UPDATE billing_subscriptions
+       SET status=$2,paid_through=$3,portal_url=$4,provider_updated_at=$5
+       WHERE user_id=$1`,
+      [
+        userId,
+        String(attributes.status || "cancelled"),
+        paidThrough || null,
+        attributes.urls?.customer_portal || null,
+        updatedAt,
+      ],
+    );
+    return {
+      status: String(attributes.status || "cancelled"),
+      endsAt: paidThrough ? eventDate(paidThrough).toISOString() : null,
+    };
+  }
+
   startProcessor() {
     let active = false;
     const run = async () => {

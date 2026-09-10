@@ -275,6 +275,16 @@ export class ExplanationService {
       `SELECT COALESCE(SUM(allowance),0)::int allowance,
               COALESCE(SUM(consumed),0)::int consumed,
               COALESCE(SUM(reserved),0)::int reserved,
+              COALESCE(SUM(allowance-consumed-reserved)
+                FILTER (WHERE period_key LIKE 'pro:%'),0)::int monthly_remaining,
+              COALESCE(SUM(allowance-consumed-reserved)
+                FILTER (WHERE period_key LIKE 'topup:%'),0)::int refill_remaining,
+              COALESCE(SUM(allowance-consumed-reserved)
+                FILTER (WHERE period_key = 'trial'),0)::int trial_remaining,
+              COALESCE(SUM(allowance-consumed-reserved)
+                FILTER (WHERE period_key <> 'trial'
+                  AND period_key NOT LIKE 'pro:%'
+                  AND period_key NOT LIKE 'topup:%'),0)::int other_remaining,
               ($2::boolean AND EXISTS(
                 SELECT 1 FROM billing_subscriptions s
                 WHERE s.user_id=$1 AND (
@@ -287,7 +297,19 @@ export class ExplanationService {
                WHERE s.user_id=$1 AND (
                  s.status IN ('active','on_trial')
                  OR (s.status='cancelled' AND s.paid_through>NOW())
-               ) LIMIT 1) renews_at
+               ) LIMIT 1) renews_at,
+              (SELECT CASE WHEN $2::boolean THEN s.status ELSE NULL END
+               FROM billing_subscriptions s
+               WHERE s.user_id=$1 AND (
+                 s.status IN ('active','on_trial')
+                 OR (s.status='cancelled' AND s.paid_through>NOW())
+               ) LIMIT 1) subscription_status,
+              (SELECT CASE WHEN $2::boolean THEN s.test_mode ELSE NULL END
+               FROM billing_subscriptions s
+               WHERE s.user_id=$1 AND (
+                 s.status IN ('active','on_trial')
+                 OR (s.status='cancelled' AND s.paid_through>NOW())
+               ) LIMIT 1) subscription_test_mode
        FROM usage_buckets WHERE user_id = $1 AND starts_at <= NOW()
          AND ($2::boolean OR period_key = 'trial')
          AND (expires_at IS NULL OR expires_at > NOW())`,
@@ -300,7 +322,15 @@ export class ExplanationService {
       consumed: row.consumed,
       reserved: row.reserved,
       remaining: row.allowance - row.consumed - row.reserved,
+      ticketBreakdown: {
+        monthly: row.monthly_remaining,
+        refill: row.refill_remaining,
+        trial: row.trial_remaining,
+        other: row.other_remaining,
+      },
       renewsAt: row.renews_at ? new Date(row.renews_at).toISOString() : null,
+      subscriptionStatus: row.pro ? row.subscription_status : null,
+      testMode: row.pro ? row.subscription_test_mode : null,
       billingEnabled: this.config.billingEnabled,
     };
   }

@@ -103,7 +103,7 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | GEMINI_BILLING_TIER                     | `free` records zero billed cost; `paid` records estimated list-price cost as billed cost.                                               |
 | AI_MODEL_REVISION                       | Deployment-controlled cache revision. Change it when model or provider behavior changes.                                                |
 | BILLING_ENABLED                         | Defaults to `false`. Set to `true` only after both Lemon Squeezy products and the signed webhook are verified in test mode.              |
-| LEMONSQUEEZY_API_KEY                    | Server-only Lemon Squeezy API key used to create hosted checkouts and fetch the customer portal.                                        |
+| LEMONSQUEEZY_API_KEY                    | Server-only Lemon Squeezy API key used to create hosted checkouts, cancel subscriptions, and fetch the customer portal.                  |
 | LEMONSQUEEZY_STORE_ID                   | Numeric ID of the approved Lemon Squeezy store.                                                                                          |
 | LEMONSQUEEZY_PRO_VARIANT_ID             | Numeric variant ID for the $9/month Pro subscription.                                                                                    |
 | LEMONSQUEEZY_TOPUP_VARIANT_ID           | Numeric variant ID for the $6 one-time 50-ticket refill.                                                                                 |
@@ -145,7 +145,7 @@ docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
-7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. With billing disabled, checkout/webhook/portal routes are not mounted.
+7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. The UI shows monthly, refill, trial, and bonus balances separately. With billing disabled, checkout, webhook, cancellation, and portal routes are not mounted.
 8. Review real provider usage and estimated cost:
 
 ```bash

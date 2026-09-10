@@ -166,6 +166,14 @@ export function createApp(
     app.get("/api/billing/portal", auth.required, async (_req, res) => {
       res.json(await dependencies.billing!.portal(res.locals.user.id));
     });
+    app.post(
+      "/api/billing/cancel",
+      auth.required,
+      limiter(5, 60 * 60 * 1000, (_req, res) => res.locals.user.id),
+      async (_req, res) => {
+        res.json(await dependencies.billing!.cancel(res.locals.user.id));
+      },
+    );
   }
   let inFlight = 0;
   app.get("/api/health", (_req, res) =>

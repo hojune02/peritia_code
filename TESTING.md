@@ -66,7 +66,7 @@ Use Lemon Squeezy test mode and the two configured variants. Never test these ca
 3. A Pro account with tickets remaining must be rejected by the refill endpoint. At zero, buy the $6 refill and confirm exactly 50 non-expiring tickets appear.
 4. Replay the same webhook and confirm no second bucket is created. Send an invalid signature, wrong store ID, wrong test-mode flag, and wrong variant ID; none may grant tickets.
 5. Simulate cancellation and verify Pro remains active through `paid_through`; simulate expiry and verify it becomes free. Simulate order and subscription-payment refunds and verify the matching ticket bucket becomes unavailable.
-6. Confirm **Manage subscription** opens the signed Lemon Squeezy customer portal URL.
+6. Confirm **Manage plan** appears in the top bar for Pro users and opens the in-app subscription view. In test mode, cancel there and verify access remains through `paid_through`. After store activation, confirm **Open billing portal** retrieves and opens a fresh signed Lemon Squeezy URL.
 
 ## 6. Evaluate the real model with known C, Python, and React code
 

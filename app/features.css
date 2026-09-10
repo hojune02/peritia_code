@@ -82,6 +82,11 @@
 .ai-range {
   margin: 16px 0;
 }
+.ticket-breakdown {
+  color: #687b68;
+  font-size: 12px;
+  font-weight: 500;
+}
 .ai-file-scope {
   display: inline-flex;
   margin: 14px 0 2px;

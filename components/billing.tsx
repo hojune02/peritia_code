@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Crown, Loader2, Ticket } from "lucide-react";
+import { CreditCard, Crown, Loader2, Ticket } from "lucide-react";
 import { useAccount } from "./account";
 import {
   Dialog,
@@ -22,7 +22,15 @@ export type Usage = {
   consumed: number;
   reserved: number;
   remaining: number;
+  ticketBreakdown: {
+    monthly: number;
+    refill: number;
+    trial: number;
+    other: number;
+  };
   renewsAt: string | null;
+  subscriptionStatus: string | null;
+  testMode: boolean | null;
   billingEnabled: boolean;
 };
 
@@ -35,7 +43,7 @@ type BillingContext = {
   refresh: () => Promise<Usage | null>;
   openPaywall: () => void;
   checkout: (kind: PurchaseKind) => Promise<void>;
-  manage: () => Promise<void>;
+  manage: () => void;
 };
 
 const Context = createContext<BillingContext | null>(null);
@@ -44,6 +52,27 @@ export function useBilling() {
   const value = useContext(Context);
   if (!value) throw new Error("Missing billing provider");
   return value;
+}
+
+export function ticketBreakdownLabel(usage: Usage) {
+  const parts = [
+    [usage.ticketBreakdown.monthly, "monthly"],
+    [usage.ticketBreakdown.refill, "refill"],
+    [usage.ticketBreakdown.trial, "trial"],
+    [usage.ticketBreakdown.other, "bonus"],
+  ] as const;
+  return parts
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}`)
+    .join(" + ");
+}
+
+function formatBillingDate(value: string | null) {
+  if (!value) return "Not available";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(value));
 }
 
 function removeBillingQuery() {
@@ -64,6 +93,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"purchase" | "manage">("purchase");
 
   const refresh = useCallback(async () => {
     if (!account.user) {
@@ -104,6 +134,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     if (!account.user) return;
     const purchase = new URLSearchParams(location.search).get("billing");
     if (purchase !== "subscription" && purchase !== "topup") return;
+    setView("purchase");
     setOpen(true);
     setBusy(true);
     setConfirmation("");
@@ -165,7 +196,18 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const manage = async () => {
+  const manage = () => {
+    if (!account.user) {
+      account.open();
+      return;
+    }
+    setView("manage");
+    setError("");
+    setConfirmation("");
+    setOpen(true);
+  };
+
+  const openPortal = async () => {
     setBusy(true);
     setError("");
     try {
@@ -180,13 +222,44 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const cancelSubscription = async () => {
+    if (!window.confirm("Cancel future Pro renewals? Your current access remains available until the paid-through date.")) return;
+    setBusy(true);
+    setError("");
+    setConfirmation("");
+    try {
+      const response = await fetch("/api/billing/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body = await response.json();
+      if (!response.ok || body.status !== "cancelled")
+        throw new Error(body.error || "The subscription could not be cancelled.");
+      await refresh();
+      setConfirmation(
+        `Renewal cancelled. Pro remains active until ${formatBillingDate(body.endsAt || null)}.`,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The subscription could not be cancelled.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const billing = {
     usage,
     loading,
     busy,
     error,
     refresh,
-    openPaywall: () => account.user ? setOpen(true) : account.open(),
+    openPaywall: () => {
+      if (!account.user) return account.open();
+      setView("purchase");
+      setError("");
+      setConfirmation("");
+      setOpen(true);
+    },
     checkout,
     manage,
   };
@@ -199,10 +272,16 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           <DialogHeader>
             <span className="billing-icon"><Crown size={21} /></span>
             <DialogTitle>
-              {usage?.plan === "pro" ? "Keep explaining without waiting." : "Continue with Peritia Pro."}
+              {view === "manage"
+                ? "Manage Peritia Pro."
+                : usage?.plan === "pro"
+                  ? "Keep explaining without waiting."
+                  : "Continue with Peritia Pro."}
             </DialogTitle>
             <DialogDescription>
-              {usage?.plan === "pro"
+              {view === "manage"
+                ? "Review your tickets, renewal, and subscription status."
+                : usage?.plan === "pro"
                 ? "Add tickets now and keep your monthly renewal unchanged."
                 : "A predictable monthly allowance for learning unfamiliar codebases."}
             </DialogDescription>
@@ -210,7 +289,40 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           {busy ? (
             <div className="billing-pending" role="status">
               <Loader2 className="spin" size={20} />
-              Confirming your purchase securely…
+              {view === "manage" ? "Updating your subscription…" : "Confirming your purchase securely…"}
+            </div>
+          ) : view === "manage" && usage?.plan === "pro" ? (
+            <div className="billing-management">
+              <div className="billing-balance">
+                <span className="mini-label">AVAILABLE TICKETS</span>
+                <strong>{usage.remaining}</strong>
+                <span>{ticketBreakdownLabel(usage) || "No tickets remaining"}</span>
+              </div>
+              <dl className="billing-details">
+                <div>
+                  <dt>Status</dt>
+                  <dd>{usage.subscriptionStatus === "cancelled" ? "Cancels at period end" : "Active"}</dd>
+                </div>
+                <div>
+                  <dt>{usage.subscriptionStatus === "cancelled" ? "Available until" : "Next renewal"}</dt>
+                  <dd>{formatBillingDate(usage.renewsAt)}</dd>
+                </div>
+              </dl>
+              {usage.testMode && (
+                <p className="billing-test-note">
+                  Test subscription: Lemon Squeezy blocks its hosted customer portal until the store is activated. You can cancel this test subscription here.
+                </p>
+              )}
+              {!usage.testMode && (
+                <button className="primary-button" onClick={() => void openPortal()}>
+                  Open billing portal
+                </button>
+              )}
+              {usage.subscriptionStatus !== "cancelled" && (
+                <button className="billing-cancel-button" onClick={() => void cancelSubscription()}>
+                  Cancel subscription
+                </button>
+              )}
             </div>
           ) : usage?.plan === "pro" ? (
             <div className="billing-offer">
@@ -228,7 +340,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
               {usage.remaining > 0 && (
                 <p className="metadata-note">You still have {usage.remaining} tickets. Refills unlock at zero.</p>
               )}
-              <button className="small-link" onClick={() => void manage()}>Manage subscription</button>
+              <button className="small-link" onClick={manage}>Manage subscription</button>
             </div>
           ) : (
             <div className="billing-offer">
@@ -238,7 +350,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
               <ul>
                 <li>Complete-file, streamed LLM explanations</li>
                 <li>Failed attempts restore their reserved ticket</li>
-                <li>Cancel anytime through the billing portal</li>
+                <li>Cancel anytime from your Peritia account</li>
               </ul>
               <button
                 className="primary-button"
@@ -262,12 +374,18 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
 export function GoProButton() {
   const account = useAccount();
-  const { usage, loading, openPaywall } = useBilling();
-  if (account.user && usage?.plan === "pro") return null;
+  const { usage, loading, busy, openPaywall, manage } = useBilling();
+  const pro = Boolean(account.user && usage?.plan === "pro");
   return (
-    <button className="go-pro-button" onClick={openPaywall} disabled={!account.ready || loading}>
-      {loading ? <Loader2 className="spin" size={15} /> : <Crown size={15} />}
-      <span>Go Pro</span>
+    <button
+      className={pro ? "go-pro-button billing-manage-button" : "go-pro-button"}
+      onClick={pro ? manage : openPaywall}
+      disabled={!account.ready || loading || busy}
+    >
+      {loading || busy
+        ? <Loader2 className="spin" size={15} />
+        : pro ? <CreditCard size={15} /> : <Crown size={15} />}
+      <span>{pro ? "Manage plan" : "Go Pro"}</span>
     </button>
   );
 }

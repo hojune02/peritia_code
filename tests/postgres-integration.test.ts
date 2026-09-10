@@ -80,6 +80,12 @@ test("verified billing events grant Pro cycles and non-expiring refills exactly 
   const explanations = new ExplanationService(pool, config);
   assert.equal((await explanations.usage(userId)).plan, "pro");
   assert.equal((await explanations.usage(userId)).remaining, 103);
+  assert.deepEqual((await explanations.usage(userId)).ticketBreakdown, {
+    monthly: 100,
+    refill: 0,
+    trial: 3,
+    other: 0,
+  });
   await assert.rejects(
     billing.checkout({ id: userId, email: `${userId}@example.test` }, "topup"),
     (error: any) => error?.status === 409,
@@ -109,11 +115,42 @@ test("verified billing events grant Pro cycles and non-expiring refills exactly 
     first_order_item: { variant_id: 200 },
   });
   assert.equal((await explanations.usage(userId)).remaining, 50);
+  assert.equal((await explanations.usage(userId)).ticketBreakdown.refill, 50);
   await event("order_refunded", orderId, {
     status: "refunded",
     first_order_item: { variant_id: 200 },
   });
   assert.equal((await explanations.usage(userId)).remaining, 0);
+  const originalCancelFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(init?.method, "DELETE");
+    return Response.json({
+      data: {
+        id: subscriptionId,
+        attributes: {
+          store_id: 42,
+          variant_id: 100,
+          test_mode: true,
+          status: "cancelled",
+          updated_at: new Date().toISOString(),
+          ends_at: renews,
+          urls: { customer_portal: "https://example.lemonsqueezy.com/billing" },
+        },
+      },
+    });
+  };
+  try {
+    assert.deepEqual(await billing.cancel(userId), {
+      status: "cancelled",
+      endsAt: renews,
+    });
+  } finally {
+    globalThis.fetch = originalCancelFetch;
+  }
+  const cancelled = await explanations.usage(userId);
+  assert.equal(cancelled.plan, "pro");
+  assert.equal(cancelled.subscriptionStatus, "cancelled");
+  assert.equal(cancelled.testMode, true);
 });
 
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {

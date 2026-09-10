@@ -89,7 +89,7 @@ PAID_MONTHLY_ALLOWANCE=100
 TOPUP_ALLOWANCE=50
 ```
 
-Deploy once, change `BILLING_ENABLED=true`, and redeploy the API. Test an initial subscription, duplicate webhook delivery, renewal, cancellation grace time, expiry, a failed/recovered renewal, a 50-ticket refill at zero balance, and full/partial refunds. The code conservatively revokes the entire matching entitlement when a refund webhook arrives.
+Deploy once, change `BILLING_ENABLED=true`, and redeploy the API. Test an initial subscription, duplicate webhook delivery, renewal, in-app cancellation and its grace time, expiry, a failed/recovered renewal, a 50-ticket refill at zero balance, and full/partial refunds. The code conservatively revokes the entire matching entitlement when a refund webhook arrives. Test-mode management stays inside Peritia because an inactive Lemon Squeezy store rejects its hosted customer portal; live management requests a fresh signed portal URL on every click.
 
 Before live mode, activate the store and complete identity and payout verification. Replace every test credential and variant ID with its live equivalent, set `LEMONSQUEEZY_TEST_MODE=false`, repeat the complete suite, and only then accept a real card payment. Do not enable plan changes or prorations; this implementation deliberately supports one subscription variant and one refill variant.
 

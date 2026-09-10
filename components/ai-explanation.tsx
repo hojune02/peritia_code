@@ -3,7 +3,7 @@ import { Sparkles, Loader2, ExternalLink } from "lucide-react";
 import { useAccount } from "./account";
 import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
-import { useBilling } from "./billing";
+import { ticketBreakdownLabel, useBilling } from "./billing";
 
 const MarkdownOutput = lazy(() => import("./markdown-output"));
 
@@ -71,10 +71,13 @@ function UsageControl() {
   return (
     <div className="ai-range">
       <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanation tickets remaining` : "Loading allowance…"}</span>
+      {usage?.plan === "pro" && ticketBreakdownLabel(usage) && (
+        <span className="ticket-breakdown">{ticketBreakdownLabel(usage)}</span>
+      )}
       {usage?.plan === "pro" && usage.remaining === 0 ? (
         <button className="small-link" onClick={openPaywall}>Buy 50 more</button>
       ) : usage?.plan === "pro" ? (
-        <button className="small-link" onClick={() => void manage()}>Manage subscription</button>
+        <button className="small-link" onClick={manage}>Manage subscription</button>
       ) : usage ? (
         <button className="small-link" onClick={openPaywall}>Go Pro</button>
       ) : null}
