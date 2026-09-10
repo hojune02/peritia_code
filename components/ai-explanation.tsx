@@ -212,7 +212,7 @@ function Generated({
         <p className="ai-loading" role="status">
           <Loader2 size={18} className="spin" />
           {progress
-            ? "Gemini is responding… progress is saved if you leave this tab."
+            ? "LLM is responding… progress is saved if you leave this tab."
             : "Queued for the AI model… You can keep browsing."}
         </p>
       )}
@@ -238,7 +238,7 @@ function Generated({
       {data && (
         <>
           <p className="metadata-note">
-            {data.model} · Lines {data.startLine}–{data.endLine} of{" "}
+            Lines {data.startLine}–{data.endLine} of{" "}
             {data.totalLines} ·{" "}
             {data.cached ? "Cached result" : "Generated now"}
           </p>
