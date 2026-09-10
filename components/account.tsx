@@ -147,8 +147,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
             </label>
             {register && (
               <small>
-                At least 12 characters. Email addresses are not verified by this
-                MVP.
+                At least 12 characters.
               </small>
             )}
             {error && (
