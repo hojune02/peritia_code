@@ -530,10 +530,10 @@ export async function processExplanation(pool: Pool, config: Config, jobId: stri
       status: "generated",
       claims: [],
       limitations: [
-        "This explanation is streamed directly from Gemini and its line references are not independently validated.",
+        "This explanation is streamed directly from LLM and its line references are not independently validated.",
         processedChunks === prepared.chunks.length
-          ? "The complete selected file was sent to Gemini in ordered chunks; other repository files were not sent."
-          : `Gemini processed ${processedChunks} of ${prepared.chunks.length} file chunks before the provider stopped responding.`,
+          ? "The complete selected file was sent to LLM in ordered chunks; other repository files were not sent."
+          : `LLM processed ${processedChunks} of ${prepared.chunks.length} file chunks before the provider stopped responding.`,
         ...(complete ? [] : ["At least one model response ended early, so part of the explanation may be incomplete."]),
       ],
       rawText: text,

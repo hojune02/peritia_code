@@ -1388,10 +1388,10 @@ export default function Home() {
             <h3>Whole-file explanations, streamed live</h3>
             <p>
               When you explicitly request an explanation, the complete selected
-              public file is sent to Gemini in ordered chunks of up to 80 lines
+              public file is sent to LLM in ordered chunks of up to 80 lines
               and 12,000 characters. Gemini's Markdown appears as it arrives,
               and usable partial output is kept if the provider stops early.
-              Gemini receives that file—not the entire repository—and its
+              LLM receives that file—not the entire repository—and its
               explanation can still be incomplete or wrong.
             </p>
           </div>

@@ -236,7 +236,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
               <strong>$9 <small>per month</small></strong>
               <p><Ticket size={16} /> 100 explanation tickets every billing cycle</p>
               <ul>
-                <li>Complete-file, streamed Gemini explanations</li>
+                <li>Complete-file, streamed LLM explanations</li>
                 <li>Failed attempts restore their reserved ticket</li>
                 <li>Cancel anytime through the billing portal</li>
               </ul>

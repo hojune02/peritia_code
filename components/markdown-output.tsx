@@ -3,7 +3,7 @@ import remarkGfm from "remark-gfm";
 
 export default function MarkdownOutput({ text, live = false }: { text: string; live?: boolean }) {
   return (
-    <section className="ai-markdown-shell" aria-label={live ? "Live Gemini response" : "Gemini explanation"}>
+    <section className="ai-markdown-shell" aria-label={live ? "Live LLM response" : "LLM explanation"}>
       <header className="ai-markdown-bar">
         <span className="ai-window-dots" aria-hidden="true"><i /><i /><i /></span>
         <span>{live ? "LIVE ANALYSIS" : "ANALYSIS COMPLETE"}</span>
