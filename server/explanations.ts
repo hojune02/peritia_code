@@ -178,7 +178,7 @@ function publicJob(row: any): ExplanationJob {
 async function ensureTrial(client: PoolClient, userId: string) {
   await client.query(
     `INSERT INTO usage_buckets (id, user_id, period_key, allowance)
-     SELECT $1, id, 'trial', 3 FROM users WHERE id=$2 AND google_sub IS NOT NULL
+     SELECT $1, id, 'trial', 3 FROM users WHERE id=$2
      ON CONFLICT (user_id, period_key) DO NOTHING`,
     [randomUUID(), userId],
   );
@@ -267,7 +267,7 @@ export class ExplanationService {
   async usage(userId: string) {
     await this.pool.query(
       `INSERT INTO usage_buckets (id,user_id,period_key,allowance)
-       SELECT $1,id,'trial',3 FROM users WHERE id=$2 AND google_sub IS NOT NULL
+       SELECT $1,id,'trial',3 FROM users WHERE id=$2
        ON CONFLICT(user_id,period_key) DO NOTHING`,
       [randomUUID(), userId],
     );

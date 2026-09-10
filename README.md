@@ -145,7 +145,7 @@ docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
-7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. The UI shows monthly, refill, trial, and bonus balances separately. With billing disabled, checkout, webhook, cancellation, and portal routes are not mounted.
+7. Test sign-in and AI using **TESTING.md**. Every account receives one three-use trial, including password-only accounts. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. The UI shows monthly, refill, trial, and bonus balances separately. With billing disabled, checkout, webhook, cancellation, and portal routes are not mounted.
 8. Review real provider usage and estimated cost:
 
 ```bash

@@ -153,6 +153,43 @@ test("verified billing events grant Pro cycles and non-expiring refills exactly 
   assert.equal(cancelled.testMode, true);
 });
 
+test("password-only accounts receive exactly one three-ticket trial", async (t) => {
+  if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+  const userId = randomUUID();
+  await pool.query(
+    `INSERT INTO users(id,email,password,google_sub) VALUES($1,$2,$3,NULL)`,
+    [userId, `${userId}@example.test`, "stored-password-hash"],
+  );
+  t.after(async () => {
+    await pool.query(`DELETE FROM users WHERE id=$1`, [userId]);
+    await pool.end();
+  });
+  const service = new ExplanationService(pool, getConfig({
+    APP_ORIGIN: "http://localhost:5173",
+    JWT_SECRET: randomBytes(32).toString("hex"),
+    AI_MODEL_REVISION: `integration-${randomUUID()}`,
+  }));
+  const first = await service.usage(userId);
+  const second = await service.usage(userId);
+  assert.deepEqual(
+    { plan: first.plan, allowance: first.allowance, remaining: first.remaining },
+    { plan: "free", allowance: 3, remaining: 3 },
+  );
+  assert.deepEqual(second.ticketBreakdown, {
+    monthly: 0,
+    refill: 0,
+    trial: 3,
+    other: 0,
+  });
+  const buckets = await pool.query(
+    `SELECT allowance FROM usage_buckets WHERE user_id=$1 AND period_key='trial'`,
+    [userId],
+  );
+  assert.equal(buckets.rows.length, 1);
+  assert.equal(buckets.rows[0].allowance, 3);
+});
+
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {
   if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 12 });

@@ -61,7 +61,7 @@ Dense/minified code, binary files, excluded filenames, and files over 64 KB are 
 
 Use Lemon Squeezy test mode and the two configured variants. Never test these cases with live card data.
 
-1. A free account with tickets remaining shows `free plan` and a persistent **Go Pro** action. Exhaust it and confirm the subscription dialog opens automatically.
+1. Create one Google account and one password-only account. Each must show `free plan`, exactly three trial tickets, and a persistent **Go Pro** action; repeated reloads must not create another trial bucket. Exhaust one account and confirm the subscription dialog opens automatically.
 2. Complete the $9 test subscription. Returning to Peritia must show a pending confirmation until the signed webhook arrives, then `pro plan` and 100 new monthly tickets (plus any unused trial tickets).
 3. A Pro account with tickets remaining must be rejected by the refill endpoint. At zero, buy the $6 refill and confirm exactly 50 non-expiring tickets appear.
 4. Replay the same webhook and confirm no second bucket is created. Send an invalid signature, wrong store ID, wrong test-mode flag, and wrong variant ID; none may grant tickets.

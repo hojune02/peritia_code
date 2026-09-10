@@ -19,7 +19,7 @@ npm run start:api
 npm run start:worker
 ```
 
-Only Google accounts receive the three-credit trial because their email identity is provider-verified. With `BILLING_ENABLED=false`, only the trial bucket is eligible and all billing HTTP routes and background processing are disabled. Password accounts can sign in but receive no explanation credit until email verification exists.
+Every new account receives one three-credit trial bucket, including password-only accounts. With `BILLING_ENABLED=false`, only the trial bucket is eligible and all billing HTTP routes and background processing are disabled. Password email addresses are not verified, so registration throttling and abuse monitoring are required until email verification is added.
 
 ## Oracle Always Free beta
 
@@ -44,7 +44,7 @@ AI_MAX_OUTPUT_TOKENS=16384
 BILLING_ENABLED=false
 ```
 
-6. Create the Google OAuth web client and authorize `https://YOUR_DOMAIN/api/auth/google/callback`; the trial intentionally depends on Google-verified identity.
+6. Create the Google OAuth web client and authorize `https://YOUR_DOMAIN/api/auth/google/callback`; Google remains the lower-friction sign-in option, while password accounts receive the same trial allowance.
 7. Run `docker compose up -d --build`, then check `/api/health/live`, `/api/health/ready`, and one uncached explanation.
 
 The Gemini key stays in API/worker container environments and is never shipped to the browser. Restrict it to the Gemini API in Google Cloud. Free-tier prompts may be used by Google to improve its products, so this beta accepts public repositories only and the UI states that selected public source is sent to the configured provider.
