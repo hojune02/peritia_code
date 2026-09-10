@@ -357,7 +357,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
                 disabled={!usage?.billingEnabled}
                 onClick={() => void checkout("subscription")}
               >
-                Go Pro for $9/month
+                Go Pro for $9.99/month
               </button>
               {!usage?.billingEnabled && (
                 <p className="metadata-note">Purchases will open after billing is configured.</p>
