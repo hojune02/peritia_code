@@ -1367,48 +1367,63 @@ export default function Home() {
       <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
         <DialogContent className="about-dialog">
           <DialogHeader>
-            <DialogTitle>A guide you can inspect.</DialogTitle>
+            <DialogTitle>How Peritia works today.</DialogTitle>
             <DialogDescription>
-              What Peritia knows—and what it doesn't.
+              What is inspected, what Gemini receives, and what Peritia keeps.
             </DialogDescription>
           </DialogHeader>
           <div className="about-block">
-            <h3>Static structure, optional local AI</h3>
+            <h3>A repository map before AI</h3>
             <p>
-              The repository guide combines a GitHub tree, manifests, and a
-              technology glossary. When signed in, requesting an explanation
-              sends the selected public file to the configured Gemini model in
-              ordered chunks. The Markdown response is streamed directly, but
-              its interpretation can still be wrong.
+              Peritia imports public GitHub repositories and pins each guide to
+              a specific commit. It maps the visible file tree, reads one root
+              README and up to eight manifests, and combines those facts with a
+              technology glossary. Other source files are loaded only when you
+              open them.
+            </p>
+          </div>
+          <div className="about-block">
+            <h3>Whole-file explanations, streamed live</h3>
+            <p>
+              When you explicitly request an explanation, the complete selected
+              public file is sent to Gemini in ordered chunks of up to 80 lines
+              and 12,000 characters. Gemini's Markdown appears as it arrives,
+              and usable partial output is kept if the provider stops early.
+              Gemini receives that file—not the entire repository—and its
+              explanation can still be incomplete or wrong.
             </p>
           </div>
           <div className="about-block">
             <h3>Evidence and inference are different</h3>
             <p>
-              File paths and declared dependencies are observed. Folder
-              descriptions are naming-based inferences. Import and symbol lists
-              are best-effort text extraction, not a complete program analysis.
-              No claim of verified runtime behavior is made.
+              File paths, source text, and declared dependencies are observed.
+              Folder roles, important-file suggestions, imports, and symbol
+              lists are best-effort inferences—not verified architecture or
+              runtime analysis. Always compare AI claims with the commit-pinned
+              source shown beside them.
             </p>
           </div>
           <div className="about-block">
-            <h3>Bounded by design</h3>
+            <h3>Accounts, limits, and stored data</h3>
             <p>
-              Up to 2,500 visible files, 16 initial source reads, and 64 KB per
-              source. Large repositories may be partial. Private repositories,
-              binaries, common secret filenames, dependency folders, and known
-              build outputs are excluded. A missing detection is not proof a
-              technology is absent.
+              PostgreSQL keeps accounts, revocable sessions, saved repository
+              links, reviewed paths, explanation jobs, and usage. Eligible
+              Google accounts start with three beta explanations. Public source,
+              repository snapshots, and matching explanation results may be
+              reused from shared server caches. Deleting a saved repository
+              removes your link and reading progress, but not GitHub's repository
+              or shared cache entries.
             </p>
           </div>
           <div className="about-block">
-            <h3>Snapshot and privacy</h3>
+            <h3>Bounded and non-executing</h3>
             <p>
-              Live guides are pinned to a commit. Repository snapshots and
-              source cache entries are shared, while each account stores only
-              its repository links and reviewed file paths in PostgreSQL.
-              Explanations and revocable sessions are durable. No repository
-              code is executed.
+              A guide includes up to 2,500 visible files, and an opened source
+              file may be up to 64 KB. Large repositories can be partial.
+              Private repositories, binaries, common secret filenames,
+              dependency folders, and known build output are excluded. Peritia
+              never executes repository code, and a missing detection does not
+              prove that a technology is absent.
             </p>
           </div>
         </DialogContent>
