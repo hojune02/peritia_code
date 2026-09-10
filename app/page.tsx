@@ -68,6 +68,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoGuide } from "@/lib/demo";
 import { AccountControl, useAccount } from "@/components/account";
+import { GoProButton } from "@/components/billing";
 import { AIExplanation } from "@/components/ai-explanation";
 import {
   describePath,
@@ -768,6 +769,7 @@ export default function Home() {
             </span>
           </div>
           <div className="topbar-actions">
+            <GoProButton />
             <AccountControl />
             {!guide.sample && (
               <a

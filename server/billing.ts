@@ -10,40 +10,85 @@ export function verifyWebhook(rawBody: Buffer, signature: string | undefined, se
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-type BillingOptions = {
+export type BillingOptions = {
   apiKey: string;
   storeId: string;
-  variantId: string;
+  proVariantId: string;
+  topUpVariantId: string;
   webhookSecret: string;
   testMode: boolean;
   appUrl: string;
   paidAllowance: number;
+  topUpAllowance: number;
 };
+
+export type PurchaseKind = "subscription" | "topup";
+
+function activeSubscription() {
+  return `(status IN ('active','on_trial')
+    OR (status='cancelled' AND paid_through > NOW()))`;
+}
+
+function eventDate(value: unknown) {
+  const date = new Date(typeof value === "string" ? value : "invalid");
+  if (!Number.isFinite(date.valueOf())) throw new Error("BILLING_TIMESTAMP_INVALID");
+  return date;
+}
+
+function nextMonth(date: Date) {
+  const result = new Date(date);
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + 1);
+  const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
+  return result;
+}
 
 export class BillingService {
   constructor(private pool: Pool, private options: BillingOptions) {}
 
-  async checkout(user: { id: string; email: string }) {
-    if (!this.options.apiKey || !this.options.storeId || !this.options.variantId)
+  async checkout(user: { id: string; email: string }, kind: PurchaseKind) {
+    const variantId = kind === "subscription"
+      ? this.options.proVariantId
+      : this.options.topUpVariantId;
+    if (!this.options.apiKey || !this.options.storeId || !variantId)
       throw new RepoError("Billing is not configured.", 503);
     const active = await this.pool.query(
       `SELECT 1 FROM billing_subscriptions
-       WHERE user_id=$1 AND (status IN ('active','on_trial','paused') OR (status='cancelled' AND paid_through > NOW()))
+       WHERE user_id=$1 AND ${activeSubscription()}
        LIMIT 1`,
       [user.id],
     );
-    if (active.rows[0]) throw new RepoError("You already have an active subscription.", 409);
+    if (kind === "subscription" && active.rows[0])
+      throw new RepoError("You already have an active Pro subscription.", 409);
+    if (kind === "topup" && !active.rows[0])
+      throw new RepoError("Ticket refills are available to active Pro subscribers.", 403);
+    if (kind === "topup") {
+      const available = await this.pool.query<{ remaining: number }>(
+        `SELECT COALESCE(SUM(allowance-reserved-consumed),0)::int AS remaining
+         FROM usage_buckets
+         WHERE user_id=$1 AND starts_at<=NOW()
+           AND (expires_at IS NULL OR expires_at>NOW())`,
+        [user.id],
+      );
+      if (Number(available.rows[0]?.remaining || 0) > 0)
+        throw new RepoError("Use your remaining tickets before buying a refill.", 409);
+    }
     const payload = {
       data: {
         type: "checkouts",
         attributes: {
           test_mode: this.options.testMode,
-          product_options: { redirect_url: `${this.options.appUrl}/?billing=success`, enabled_variants: [Number(this.options.variantId)] },
-          checkout_data: { email: user.email, custom: { user_id: user.id } },
+          product_options: {
+            redirect_url: `${this.options.appUrl}/?billing=${kind}`,
+            enabled_variants: [Number(variantId)],
+          },
+          checkout_data: { email: user.email, custom: { user_id: user.id, purchase_kind: kind } },
         },
         relationships: {
           store: { data: { type: "stores", id: this.options.storeId } },
-          variant: { data: { type: "variants", id: this.options.variantId } },
+          variant: { data: { type: "variants", id: variantId } },
         },
       },
     };
@@ -107,9 +152,11 @@ export class BillingService {
         knownSubscription = known.rows[0];
       }
       const variantId = a.variant_id ?? a.first_order_item?.variant_id ?? knownSubscription?.variant_id;
-      if (String(variantId) !== this.options.variantId) throw new Error("BILLING_VARIANT_MISMATCH");
+      const isPro = String(variantId) === this.options.proVariantId;
+      const isTopUp = String(variantId) === this.options.topUpVariantId;
 
       if (stateEvent) {
+        if (!isPro) throw new Error("BILLING_VARIANT_MISMATCH");
         const updated = new Date(a.updated_at || a.created_at);
         if (!Number.isFinite(updated.valueOf())) throw new Error("BILLING_TIMESTAMP_INVALID");
         await client.query(
@@ -127,18 +174,40 @@ export class BillingService {
         );
       }
 
-      if (["subscription_payment_success", "subscription_payment_recovered", "order_created"].includes(name)) {
+      if (["subscription_payment_success", "subscription_payment_recovered"].includes(name)) {
+        if (!isPro) throw new Error("BILLING_VARIANT_MISMATCH");
         if (a.status && a.status !== "paid") throw new Error("BILLING_PAYMENT_NOT_PAID");
-        const starts = new Date(a.created_at || payload.meta?.test_mode_created_at);
+        const starts = eventDate(a.created_at || payload.meta?.test_mode_created_at);
         const knownEnd = knownSubscription?.paid_through ? new Date(knownSubscription.paid_through) : null;
-        const ends = knownEnd && knownEnd > starts ? knownEnd : new Date(starts.valueOf() + 31 * 86400_000);
-        const paymentId = String(a.order_id || a.invoice_id || payload.data.id);
-        const entitlement = subscriptionId || `order-${payload.data.id}`;
-        const periodKey = `paid:${entitlement}:${starts.toISOString()}:${paymentId}`;
+        const ends = knownEnd && knownEnd > starts ? knownEnd : nextMonth(starts);
+        const paymentId = String(payload.data.id);
+        const periodKey = `pro:${subscriptionId}:${paymentId}`;
         await client.query(
           `INSERT INTO usage_buckets(id,user_id,period_key,allowance,starts_at,expires_at)
            VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,period_key) DO NOTHING`,
           [randomUUID(), userId, periodKey, this.options.paidAllowance, starts, ends],
+        );
+      }
+      if (name === "order_created" && isTopUp) {
+        if (a.status && a.status !== "paid") throw new Error("BILLING_PAYMENT_NOT_PAID");
+        await client.query(
+          `INSERT INTO usage_buckets(id,user_id,period_key,allowance)
+           VALUES($1,$2,$3,$4) ON CONFLICT(user_id,period_key) DO NOTHING`,
+          [randomUUID(), userId, `topup:${payload.data.id}`, this.options.topUpAllowance],
+        );
+      }
+      if (name === "order_refunded" && isTopUp) {
+        await client.query(
+          `UPDATE usage_buckets SET expires_at=NOW()
+           WHERE user_id=$1 AND period_key=$2`,
+          [userId, `topup:${payload.data.id}`],
+        );
+      }
+      if (name === "subscription_payment_refunded" && isPro) {
+        await client.query(
+          `UPDATE usage_buckets SET expires_at=NOW()
+           WHERE user_id=$1 AND period_key=$2`,
+          [userId, `pro:${subscriptionId}:${payload.data.id}`],
         );
       }
       await client.query(`UPDATE billing_events SET processed_at=NOW(),error_code=NULL WHERE payload_hash=$1`, [hash]);
@@ -190,10 +259,12 @@ export function billingOptions(env = process.env): BillingOptions {
   return {
     apiKey: env.LEMONSQUEEZY_API_KEY || "",
     storeId: env.LEMONSQUEEZY_STORE_ID || "",
-    variantId: env.LEMONSQUEEZY_VARIANT_ID || "",
+    proVariantId: env.LEMONSQUEEZY_PRO_VARIANT_ID || "",
+    topUpVariantId: env.LEMONSQUEEZY_TOPUP_VARIANT_ID || "",
     webhookSecret: env.LEMONSQUEEZY_WEBHOOK_SECRET || "",
     testMode: env.LEMONSQUEEZY_TEST_MODE !== "false",
     appUrl: env.APP_URL || env.APP_ORIGIN || "http://localhost:5173",
     paidAllowance: Number(env.PAID_MONTHLY_ALLOWANCE || 100),
+    topUpAllowance: Number(env.TOPUP_ALLOWANCE || 50),
   };
 }

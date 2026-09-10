@@ -102,7 +102,13 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | GEMINI_MODEL                            | Production model; defaults to `gemini-3.5-flash-lite`.                                                                                  |
 | GEMINI_BILLING_TIER                     | `free` records zero billed cost; `paid` records estimated list-price cost as billed cost.                                               |
 | AI_MODEL_REVISION                       | Deployment-controlled cache revision. Change it when model or provider behavior changes.                                                |
-| BILLING_ENABLED                         | Defaults to `false`. Billing routes and processing do not start unless explicitly enabled.                                              |
+| BILLING_ENABLED                         | Defaults to `false`. Set to `true` only after both Lemon Squeezy products and the signed webhook are verified in test mode.              |
+| LEMONSQUEEZY_API_KEY                    | Server-only Lemon Squeezy API key used to create hosted checkouts and fetch the customer portal.                                        |
+| LEMONSQUEEZY_STORE_ID                   | Numeric ID of the approved Lemon Squeezy store.                                                                                          |
+| LEMONSQUEEZY_PRO_VARIANT_ID             | Numeric variant ID for the $9/month Pro subscription.                                                                                    |
+| LEMONSQUEEZY_TOPUP_VARIANT_ID           | Numeric variant ID for the $6 one-time 50-ticket refill.                                                                                 |
+| LEMONSQUEEZY_WEBHOOK_SECRET             | Secret used to verify the `X-Signature` of every billing webhook.                                                                        |
+| PAID_MONTHLY_ALLOWANCE / TOPUP_ALLOWANCE| Defaults to 100 monthly tickets and 50 non-expiring refill tickets. Keep these aligned with the checkout copy.                           |
 | OLLAMA_URL                              | Defaults to `http://127.0.0.1:11434`. Local hosts or private Docker hostname `ollama` only.                                     |
 | OLLAMA_MODEL                            | Defaults to `qwen2.5-coder:7b`; must be installed locally. Cloud model names are rejected.                                      |
 | PORT                                    | Express port, default 3001. Development script uses 3001 to match the Vite proxy.                                               |
@@ -129,7 +135,7 @@ The supplied Compose topology runs separate API and worker processes with Postgr
 
 1. Upload this `peritia/` folder to your machine. Keep secrets outside Git and use a restrictive file permission for the environment file.
 2. Run the local setup once, or copy `.env.example` to `.env` and generate a random JWT secret using the command documented there.
-3. Set `DOMAIN`, `POSTGRES_PASSWORD`, `GEMINI_API_KEY`, and `AI_MODEL_REVISION` in `.env`. Keep `GEMINI_BILLING_TIER=free` and `BILLING_ENABLED=false`. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
+3. Set `DOMAIN`, `POSTGRES_PASSWORD`, `GEMINI_API_KEY`, and `AI_MODEL_REVISION` in `.env`. Keep `GEMINI_BILLING_TIER=free` and `BILLING_ENABLED=false` until the Lemon Squeezy test-mode checklist in `OPERATIONS.md` passes. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
 4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001, 5432, or 6379.
 5. Start the stack:
 
@@ -139,7 +145,7 @@ docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
-7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. With billing disabled, historical paid buckets are ignored and checkout/webhook/portal routes are not mounted.
+7. Test sign-in and AI using **TESTING.md**. Only Google-authenticated users receive the three-use trial. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. With billing disabled, checkout/webhook/portal routes are not mounted.
 8. Review real provider usage and estimated cost:
 
 ```bash

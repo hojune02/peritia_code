@@ -275,7 +275,19 @@ export class ExplanationService {
       `SELECT COALESCE(SUM(allowance),0)::int allowance,
               COALESCE(SUM(consumed),0)::int consumed,
               COALESCE(SUM(reserved),0)::int reserved,
-              BOOL_OR(period_key <> 'trial') paid
+              ($2::boolean AND EXISTS(
+                SELECT 1 FROM billing_subscriptions s
+                WHERE s.user_id=$1 AND (
+                  s.status IN ('active','on_trial')
+                  OR (s.status='cancelled' AND s.paid_through>NOW())
+                )
+              )) pro,
+              (SELECT CASE WHEN $2::boolean THEN s.paid_through ELSE NULL END
+               FROM billing_subscriptions s
+               WHERE s.user_id=$1 AND (
+                 s.status IN ('active','on_trial')
+                 OR (s.status='cancelled' AND s.paid_through>NOW())
+               ) LIMIT 1) renews_at
        FROM usage_buckets WHERE user_id = $1 AND starts_at <= NOW()
          AND ($2::boolean OR period_key = 'trial')
          AND (expires_at IS NULL OR expires_at > NOW())`,
@@ -283,11 +295,12 @@ export class ExplanationService {
     );
     const row = result.rows[0];
     return {
-      plan: row.paid ? "paid" : "free",
+      plan: row.pro ? "pro" : "free",
       allowance: row.allowance,
       consumed: row.consumed,
       reserved: row.reserved,
       remaining: row.allowance - row.consumed - row.reserved,
+      renewsAt: row.renews_at ? new Date(row.renews_at).toISOString() : null,
       billingEnabled: this.config.billingEnabled,
     };
   }

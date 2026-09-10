@@ -57,7 +57,18 @@ Install/start Ollama with cloud disabled and run `ollama pull qwen2.5-coder:7b` 
 
 Dense/minified code, binary files, excluded filenames, and files over 64 KB are deliberately unsupported or rejected with an explanation. Missing/model-invalid results must never be represented as successful AI explanations.
 
-## 5. Evaluate the real model with known C, Python, and React code
+## 5. Test Lemon Squeezy before live billing
+
+Use Lemon Squeezy test mode and the two configured variants. Never test these cases with live card data.
+
+1. A free account with tickets remaining shows `free plan` and a persistent **Go Pro** action. Exhaust it and confirm the subscription dialog opens automatically.
+2. Complete the $9 test subscription. Returning to Peritia must show a pending confirmation until the signed webhook arrives, then `pro plan` and 100 new monthly tickets (plus any unused trial tickets).
+3. A Pro account with tickets remaining must be rejected by the refill endpoint. At zero, buy the $6 refill and confirm exactly 50 non-expiring tickets appear.
+4. Replay the same webhook and confirm no second bucket is created. Send an invalid signature, wrong store ID, wrong test-mode flag, and wrong variant ID; none may grant tickets.
+5. Simulate cancellation and verify Pro remains active through `paid_through`; simulate expiry and verify it becomes free. Simulate order and subscription-payment refunds and verify the matching ticket bucket becomes unavailable.
+6. Confirm **Manage subscription** opens the signed Lemon Squeezy customer portal URL.
+
+## 6. Evaluate the real model with known C, Python, and React code
 
 With Ollama running:
 
@@ -77,7 +88,7 @@ Compare each explanation with this rubric:
 
 For each fixture, inspect **all claims**, not just whether required keywords appear. Record missing facts and unsupported claims. Reject explanations that assert unsafe guarantees or obey repository instructions. This tiny evaluation is a starting point; add representative files from your real repositories before judging model quality.
 
-## 6. Test API protection with curl
+## 7. Test API protection with curl
 
 Keep the development server running. These examples intentionally call the Express port directly with the configured browser Origin. On hosted HTTPS, substitute your domain in both URL and Origin, and use `__Host-peritia_session` when inspecting cookies.
 

@@ -3,6 +3,7 @@ import { Sparkles, Loader2, ExternalLink } from "lucide-react";
 import { useAccount } from "./account";
 import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
+import { useBilling } from "./billing";
 
 const MarkdownOutput = lazy(() => import("./markdown-output"));
 
@@ -66,43 +67,18 @@ export function AIExplanation({
 }
 
 function UsageControl() {
-  const [usage, setUsage] = useState<{ plan: string; remaining: number; billingEnabled: boolean } | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const load = () => {
-      void fetch("/api/usage")
-        .then(async (response) => {
-          if (!response.ok) throw new Error("Usage is unavailable.");
-          setUsage(await response.json());
-        })
-        .catch((reason) => setError(reason instanceof Error ? reason.message : "Usage is unavailable."));
-    };
-    load();
-    window.addEventListener("peritia:usage-changed", load);
-    return () => window.removeEventListener("peritia:usage-changed", load);
-  }, []);
-  const openBilling = async (path: "checkout" | "portal") => {
-    setError("");
-    const response = await fetch(`/api/billing/${path}`, {
-      method: path === "checkout" ? "POST" : "GET",
-      headers: path === "checkout" ? { "Content-Type": "application/json" } : undefined,
-      body: path === "checkout" ? "{}" : undefined,
-    });
-    const body = await response.json();
-    if (!response.ok || !body.url) {
-      setError(body.error || "Billing is unavailable.");
-      return;
-    }
-    location.assign(body.url);
-  };
+  const { usage, loading, error, openPaywall, manage } = useBilling();
   return (
     <div className="ai-range">
-      <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanations remaining` : "Loading allowance…"}</span>
-      {usage?.billingEnabled && usage.plan === "paid" ? (
-        <button className="small-link" onClick={() => void openBilling("portal")}>Manage subscription</button>
-      ) : usage?.billingEnabled ? (
-        <button className="small-link" onClick={() => void openBilling("checkout")}>Upgrade</button>
+      <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanation tickets remaining` : "Loading allowance…"}</span>
+      {usage?.plan === "pro" && usage.remaining === 0 ? (
+        <button className="small-link" onClick={openPaywall}>Buy 50 more</button>
+      ) : usage?.plan === "pro" ? (
+        <button className="small-link" onClick={() => void manage()}>Manage subscription</button>
+      ) : usage ? (
+        <button className="small-link" onClick={openPaywall}>Go Pro</button>
       ) : null}
+      {loading && <Loader2 size={13} className="spin" />}
       {error && <span role="alert">{error}</span>}
     </div>
   );
@@ -117,11 +93,13 @@ function Generated({
   level: string;
 }) {
   const { refresh, user } = useAccount();
+  const billing = useBilling();
   const [data, setData] = useState<Explanation | null>(null);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [jobId, setJobId] = useState<string | null>(null),
-    [progress, setProgress] = useState("");
+    [progress, setProgress] = useState(""),
+    [quotaExhausted, setQuotaExhausted] = useState(false);
   const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:file:${level}`;
 
   useEffect(() => {
@@ -130,6 +108,7 @@ function Generated({
     setData(null);
     setProgress("");
     setError("");
+    setQuotaExhausted(false);
   }, [storageKey]);
 
   useEffect(() => {
@@ -169,6 +148,7 @@ function Generated({
     const controller = new AbortController();
     setBusy(true);
     setError("");
+    setQuotaExhausted(false);
     setData(null);
     setProgress("");
     void (async () => {
@@ -190,6 +170,10 @@ function Generated({
         });
         const result = await response.json();
         if (response.status === 401) void refresh();
+        if (result.code === "QUOTA_EXHAUSTED") {
+          setQuotaExhausted(true);
+          billing.openPaywall();
+        }
         if (!response.ok)
           throw new Error(result.error || "Explanation failed.");
         sessionStorage.setItem(storageKey, result.jobId);
@@ -226,12 +210,15 @@ function Generated({
           <button
             className="secondary-button"
             onClick={() => {
-              sessionStorage.removeItem(storageKey);
-              setJobId(null);
-              generate();
+              if (quotaExhausted) billing.openPaywall();
+              else {
+                sessionStorage.removeItem(storageKey);
+                setJobId(null);
+                generate();
+              }
             }}
           >
-            Retry explanation
+            {quotaExhausted ? "View ticket options" : "Retry explanation"}
           </button>
         </div>
       )}

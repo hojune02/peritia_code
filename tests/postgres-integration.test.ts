@@ -1,11 +1,120 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { ExplanationService, failExplanation, processExplanation } from "../server/explanations";
 import { getConfig } from "../server/config";
 import { RepositoryLibrary } from "../server/repositories";
 import type { Guide } from "../lib/repository";
+import { BillingService } from "../server/billing";
+
+test("verified billing events grant Pro cycles and non-expiring refills exactly once", async (t) => {
+  if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  const userId = randomUUID();
+  const subscriptionId = `sub-${randomUUID()}`;
+  const invoiceId = `invoice-${randomUUID()}`;
+  const orderId = `order-${randomUUID()}`;
+  const hashes: string[] = [];
+  await pool.query(
+    `INSERT INTO users(id,email,google_sub) VALUES($1,$2,$3)`,
+    [userId, `${userId}@example.test`, `billing-${userId}`],
+  );
+  t.after(async () => {
+    await pool.query(`DELETE FROM billing_events WHERE payload_hash=ANY($1::text[])`, [hashes]);
+    await pool.query(`DELETE FROM users WHERE id=$1`, [userId]);
+    await pool.end();
+  });
+  const billing = new BillingService(pool, {
+    apiKey: "test-key",
+    storeId: "42",
+    proVariantId: "100",
+    topUpVariantId: "200",
+    webhookSecret: "test-secret",
+    testMode: true,
+    appUrl: "https://peritia.example",
+    paidAllowance: 100,
+    topUpAllowance: 50,
+  });
+  const event = async (name: string, id: string, attributes: Record<string, unknown>) => {
+    const payload = {
+      meta: { event_name: name, custom_data: { user_id: userId } },
+      data: { type: "test", id, attributes: { store_id: 42, test_mode: true, ...attributes } },
+    };
+    const raw = Buffer.from(JSON.stringify(payload));
+    const hash = createHash("sha256").update(raw).digest("hex");
+    hashes.push(hash);
+    await pool.query(
+      `INSERT INTO billing_events(payload_hash,event_name,resource_id,payload)
+       VALUES($1,$2,$3,$4)`,
+      [hash, name, id, payload],
+    );
+    await billing.process(hash);
+  };
+  const now = new Date();
+  const renews = new Date(now.valueOf() + 30 * 86400_000).toISOString();
+  await event("subscription_created", subscriptionId, {
+    variant_id: 100,
+    customer_id: 7,
+    status: "active",
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    renews_at: renews,
+    urls: { customer_portal: "https://example.lemonsqueezy.com/billing" },
+  });
+  await event("subscription_payment_success", invoiceId, {
+    subscription_id: subscriptionId,
+    status: "paid",
+    created_at: now.toISOString(),
+  });
+  const config = getConfig({
+    APP_ORIGIN: "https://peritia.example",
+    JWT_SECRET: randomBytes(32).toString("hex"),
+    BILLING_ENABLED: "true",
+    LEMONSQUEEZY_API_KEY: "test-key",
+    LEMONSQUEEZY_STORE_ID: "42",
+    LEMONSQUEEZY_PRO_VARIANT_ID: "100",
+    LEMONSQUEEZY_TOPUP_VARIANT_ID: "200",
+    LEMONSQUEEZY_WEBHOOK_SECRET: "test-secret",
+  });
+  const explanations = new ExplanationService(pool, config);
+  assert.equal((await explanations.usage(userId)).plan, "pro");
+  assert.equal((await explanations.usage(userId)).remaining, 103);
+  await assert.rejects(
+    billing.checkout({ id: userId, email: `${userId}@example.test` }, "topup"),
+    (error: any) => error?.status === 409,
+  );
+  await pool.query(`UPDATE usage_buckets SET consumed=allowance WHERE user_id=$1`, [userId]);
+  const originalFetch = globalThis.fetch;
+  let checkoutBody: any;
+  globalThis.fetch = async (_url, init) => {
+    checkoutBody = JSON.parse(String(init?.body));
+    return Response.json({ data: { attributes: { url: "https://example.lemonsqueezy.com/checkout" } } });
+  };
+  try {
+    assert.deepEqual(
+      await billing.checkout({ id: userId, email: `${userId}@example.test` }, "topup"),
+      { url: "https://example.lemonsqueezy.com/checkout" },
+    );
+    assert.equal(checkoutBody.data.relationships.variant.data.id, "200");
+    await assert.rejects(
+      billing.checkout({ id: userId, email: `${userId}@example.test` }, "subscription"),
+      (error: any) => error?.status === 409,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await event("order_created", orderId, {
+    status: "paid",
+    first_order_item: { variant_id: 200 },
+  });
+  assert.equal((await explanations.usage(userId)).remaining, 50);
+  await event("order_refunded", orderId, {
+    status: "refunded",
+    first_order_item: { variant_id: 200 },
+  });
+  assert.equal((await explanations.usage(userId)).remaining, 0);
+});
 
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {
   if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
@@ -145,7 +254,7 @@ test("saved repositories and reviewed files are isolated by user", async (t) => 
     ],
   );
   const library = new RepositoryLibrary(pool);
-  const guide = (owner: string, name: string, commit: string) => ({ owner, name, commit } as Guide);
+  const guide = (owner: string, name: string, commit: string) => ({ owner, name, commit, files: [] } as unknown as Guide);
   await library.save(firstUser, guide("alice", "one", firstCommit));
   await library.save(secondUser, guide("bob", "two", secondCommit));
   assert.deepEqual((await library.list(firstUser)).map((item) => item.name), ["one"]);

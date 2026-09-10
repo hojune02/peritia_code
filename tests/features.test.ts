@@ -19,7 +19,7 @@ import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
 import { demoGuide } from "../lib/demo";
 import { chunkExplanationFile, makeCacheKey } from "../server/explanations";
-import { verifyWebhook } from "../server/billing";
+import { verifyWebhook, type BillingService } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
 
@@ -186,6 +186,7 @@ async function fixture(
     googleVerify?: typeof verifyGoogleToken;
     production?: boolean;
     repositories?: RepositoryEndpoints;
+    billing?: BillingService;
   } = {},
 ) {
   const store = new Store(":memory:");
@@ -193,6 +194,7 @@ async function fixture(
   const settings = {
     ...config,
     production: options.production ?? false,
+    billingEnabled: Boolean(options.billing),
     googleClientId: "test-client",
     googleClientSecret: "test-secret",
   };
@@ -203,6 +205,7 @@ async function fixture(
       return { ...output, status: "generated" } as Explanation;
     },
     repositories: options.repositories,
+    billing: options.billing,
   });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -361,6 +364,25 @@ test("repository library endpoints use the authenticated account identity", asyn
   assert.deepEqual(opened, [first.user.id]);
   assert.deepEqual(removed, [first.user.id]);
   assert.deepEqual(reviewed, [second.user.id]);
+});
+test("billing checkout requires authentication, validates purchase type, and uses account identity", async (t) => {
+  const purchases: Array<{ userId: string; kind: string }> = [];
+  const billing = {
+    webhook: (_req: any, res: any) => res.json({ accepted: true }),
+    checkout: async (user: { id: string }, kind: string) => {
+      purchases.push({ userId: user.id, kind });
+      return { url: "https://example.lemonsqueezy.com/checkout" };
+    },
+    portal: async () => ({ url: "https://example.lemonsqueezy.com/billing" }),
+  } as unknown as BillingService;
+  const f = await fixture(t, { billing });
+  const cookie = await f.register("billing@example.com");
+  const session = await (await f.get("/api/auth/session", cookie)).json();
+  assert.equal((await f.post("/api/billing/checkout", { kind: "subscription" })).status, 401);
+  assert.equal((await f.post("/api/billing/checkout", { kind: "credits" }, cookie)).status, 400);
+  const response = await f.post("/api/billing/checkout", { kind: "topup" }, cookie);
+  assert.equal(response.status, 200);
+  assert.deepEqual(purchases, [{ userId: session.user.id, kind: "topup" }]);
 });
 test("JWT: unsigned, tampered, expired, wrong-audience, wrong-issuer tokens are rejected", async (t) => {
   const f = await fixture(t);
@@ -818,9 +840,28 @@ test("configuration refuses weak secrets, paid/cloud endpoints, and non-HTTPS pr
     { OLLAMA_MODEL: "model:cloud" },
     { AI_PROVIDER: "gemini" },
     { GEMINI_BILLING_TIER: "unknown" },
+    { BILLING_ENABLED: "true" },
+    {
+      BILLING_ENABLED: "true",
+      LEMONSQUEEZY_API_KEY: "key",
+      LEMONSQUEEZY_STORE_ID: "store-not-a-number",
+      LEMONSQUEEZY_PRO_VARIANT_ID: "100",
+      LEMONSQUEEZY_TOPUP_VARIANT_ID: "200",
+      LEMONSQUEEZY_WEBHOOK_SECRET: "secret",
+    },
     { NODE_ENV: "production", APP_ORIGIN: "http://localhost:3001" },
   ])
     assert.throws(() =>
       getConfig({ APP_ORIGIN: origin, JWT_SECRET: config.secret, ...change }),
     );
+  assert.equal(getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    BILLING_ENABLED: "true",
+    LEMONSQUEEZY_API_KEY: "key",
+    LEMONSQUEEZY_STORE_ID: "42",
+    LEMONSQUEEZY_PRO_VARIANT_ID: "100",
+    LEMONSQUEEZY_TOPUP_VARIANT_ID: "200",
+    LEMONSQUEEZY_WEBHOOK_SECRET: "secret",
+  }).billingEnabled, true);
 });

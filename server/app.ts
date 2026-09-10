@@ -152,9 +152,17 @@ export function createApp(
     });
   }
   if (config.billingEnabled && dependencies.billing) {
-    app.post("/api/billing/checkout", auth.required, async (_req, res) => {
-      res.json(await dependencies.billing!.checkout(res.locals.user));
-    });
+    app.post(
+      "/api/billing/checkout",
+      auth.required,
+      limiter(10, 60 * 60 * 1000, (_req, res) => res.locals.user.id),
+      async (req, res) => {
+        const kind = req.body?.kind;
+        if (kind !== "subscription" && kind !== "topup")
+          throw new RepoError("Choose a subscription or ticket refill.");
+        res.json(await dependencies.billing!.checkout(res.locals.user, kind));
+      },
+    );
     app.get("/api/billing/portal", auth.required, async (_req, res) => {
       res.json(await dependencies.billing!.portal(res.locals.user.id));
     });

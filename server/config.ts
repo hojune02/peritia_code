@@ -72,6 +72,28 @@ export function getConfig(env = process.env): Config {
     throw new Error("AI_MODEL_REVISION is too long.");
   if (!!env.GOOGLE_CLIENT_ID !== !!env.GOOGLE_CLIENT_SECRET)
     throw new Error("Set both Google client credentials or neither.");
+  const billingEnabled = env.BILLING_ENABLED === "true";
+  if (billingEnabled) {
+    for (const name of [
+      "LEMONSQUEEZY_API_KEY",
+      "LEMONSQUEEZY_STORE_ID",
+      "LEMONSQUEEZY_PRO_VARIANT_ID",
+      "LEMONSQUEEZY_TOPUP_VARIANT_ID",
+      "LEMONSQUEEZY_WEBHOOK_SECRET",
+    ] as const) {
+      if (!env[name]) throw new Error(`${name} is required when billing is enabled.`);
+    }
+    for (const name of ["LEMONSQUEEZY_STORE_ID", "LEMONSQUEEZY_PRO_VARIANT_ID", "LEMONSQUEEZY_TOPUP_VARIANT_ID"] as const) {
+      if (!/^[1-9][0-9]*$/.test(env[name] || "")) throw new Error(`${name} must be a numeric Lemon Squeezy ID.`);
+    }
+    for (const [name, value] of [
+      ["PAID_MONTHLY_ALLOWANCE", env.PAID_MONTHLY_ALLOWANCE ?? "100"],
+      ["TOPUP_ALLOWANCE", env.TOPUP_ALLOWANCE ?? "50"],
+    ] as const) {
+      if (!Number.isSafeInteger(Number(value)) || Number(value) <= 0)
+        throw new Error(`${name} must be a positive integer.`);
+    }
+  }
   return {
     origin,
     secret,
@@ -85,6 +107,6 @@ export function getConfig(env = process.env): Config {
     geminiBillingTier: geminiBillingTier as "free" | "paid",
     ollamaUrl,
     model,
-    billingEnabled: env.BILLING_ENABLED === "true",
+    billingEnabled,
   };
 }

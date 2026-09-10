@@ -487,6 +487,26 @@ code {
 .export-button:hover {
   background: #f0f5f1;
 }
+.go-pro-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid #789961;
+  border-radius: 5px;
+  background: #173629;
+  color: #eff8e9;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.go-pro-button:hover {
+  background: #244b39;
+}
+.go-pro-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 .mobile-trigger {
   display: none !important;
 }
@@ -1642,6 +1662,79 @@ h1 {
   color: #617c4b;
   margin-top: 8px;
 }
+.billing-dialog {
+  max-width: 510px !important;
+}
+.billing-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 7px;
+  border: 1px solid #bfd2a5;
+  border-radius: 50%;
+  background: #eff6e7;
+  color: #547840;
+}
+.billing-offer {
+  display: grid;
+  gap: 14px;
+  margin-top: 6px;
+  padding: 22px;
+  border: 1px solid #d5e2c6;
+  border-radius: 9px;
+  background: #f7faF2;
+}
+.billing-offer > strong {
+  color: #203a2e;
+  font-family: var(--font-serif);
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 1;
+}
+.billing-offer > strong small {
+  color: #70816d;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+}
+.billing-offer > p:not(.metadata-note) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #45623e;
+  font-size: 15px;
+}
+.billing-offer ul {
+  display: grid;
+  gap: 8px;
+  padding-left: 19px;
+  color: #5d7551;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.billing-offer .primary-button {
+  justify-content: center;
+  width: 100%;
+}
+.billing-pending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  border-radius: 8px;
+  background: #f2f7ed;
+  color: #4f6e43;
+}
+.billing-success {
+  padding: 12px 14px;
+  border: 1px solid #bfd7ac;
+  border-radius: 7px;
+  background: #eff8e7;
+  color: #3e6b35;
+  font-size: 13px;
+  line-height: 1.55;
+}
 .tech-plain {
   font-size: 16px;
   line-height: 1.8;
@@ -2061,6 +2154,12 @@ h1 {
     padding: 9px;
   }
   .export-button > span {
+    display: none;
+  }
+  .go-pro-button {
+    padding: 9px;
+  }
+  .go-pro-button > span {
     display: none;
   }
   .document {

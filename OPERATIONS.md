@@ -1,6 +1,6 @@
 # Production launch runbook
 
-The zero-cost beta runs on one Oracle Always Free ARM VM. PostgreSQL is the source of truth, Redis/BullMQ carries durable job IDs, and the worker streams Gemini 2.5 Flash-Lite results. The legacy local `/api/explain` endpoint remains for development compatibility; production browsers use `/api/explanations`.
+The zero-cost beta runs on one Oracle Always Free ARM VM. PostgreSQL is the source of truth, Redis/BullMQ carries durable job IDs, and the worker streams Gemini 3.5 Flash-Lite results. The legacy local `/api/explain` endpoint remains for development compatibility; production browsers use `/api/explanations`.
 
 ## Local verification
 
@@ -59,21 +59,39 @@ docker compose exec api npm run ai:costs
 
 `estimated_list_cost_usd` models the configured paid price. `estimated_billed_cost_usd` remains zero while `GEMINI_BILLING_TIER=free`. Before switching tiers, update the two per-million-token price variables from Google's pricing page and change `GEMINI_BILLING_TIER=paid`.
 
-## Billing remains off
+## Lemon Squeezy products and test mode
 
-Do not configure live Lemon Squeezy credentials during the free beta. Leave `BILLING_ENABLED=false`; the UI hides upgrade controls and the server does not mount billing endpoints. The existing billing implementation remains dormant for a later tested launch.
+Peritia sells one **$9/month Pro subscription with 100 tickets per successful billing cycle** and one **$6 one-time refill with 50 non-expiring tickets**. A refill checkout is available only to an active Pro account whose current balance is zero. Checkout redirects never grant tickets; only a verified webhook can create or revoke an entitlement.
 
-## Future Lemon Squeezy test mode
+Create a Lemon Squeezy store in test mode, then create two separate products or variants:
 
-Create one monthly subscription variant and a webhook for:
+1. `Peritia Pro`: subscription, monthly billing, USD 9.00. Copy its numeric variant ID.
+2. `Peritia Pro — 50 ticket refill`: single payment, USD 6.00. Copy its numeric variant ID.
+
+Create an API key and a webhook pointing to `https://YOUR_DOMAIN/api/billing/webhook`. Subscribe it to:
 
 - `order_created`
-- `subscription_created`, `subscription_updated`, `subscription_cancelled`, and `subscription_expired`
-- `subscription_payment_success` and `subscription_payment_recovered`
+- `order_refunded`
+- `subscription_created`, `subscription_updated`, `subscription_cancelled`, `subscription_expired`, `subscription_paused`, and `subscription_unpaused`
+- `subscription_payment_success`, `subscription_payment_recovered`, and `subscription_payment_refunded`
 
-Point it to `https://YOUR_DOMAIN/api/billing/webhook`, then set the `LEMONSQUEEZY_*` variables from `.env.example`. Use a temporary HTTPS tunnel only for local test-mode delivery. Verify duplicate delivery, a bad signature, cancellation grace time, expiry, failed/recovered renewal, and out-of-order updates. Checkout redirects never grant credits; only a verified paid order/invoice event does.
+Set these values while keeping billing disabled:
 
-Before live mode, change `LEMONSQUEEZY_TEST_MODE=false`, use live IDs/secrets, and repeat the complete suite. Do not enable plan changes or prorations; this implementation deliberately supports one server-mapped variant.
+```dotenv
+BILLING_ENABLED=false
+LEMONSQUEEZY_TEST_MODE=true
+LEMONSQUEEZY_API_KEY=...
+LEMONSQUEEZY_STORE_ID=...
+LEMONSQUEEZY_PRO_VARIANT_ID=...
+LEMONSQUEEZY_TOPUP_VARIANT_ID=...
+LEMONSQUEEZY_WEBHOOK_SECRET=...
+PAID_MONTHLY_ALLOWANCE=100
+TOPUP_ALLOWANCE=50
+```
+
+Deploy once, change `BILLING_ENABLED=true`, and redeploy the API. Test an initial subscription, duplicate webhook delivery, renewal, cancellation grace time, expiry, a failed/recovered renewal, a 50-ticket refill at zero balance, and full/partial refunds. The code conservatively revokes the entire matching entitlement when a refund webhook arrives.
+
+Before live mode, activate the store and complete identity and payout verification. Replace every test credential and variant ID with its live equivalent, set `LEMONSQUEEZY_TEST_MODE=false`, repeat the complete suite, and only then accept a real card payment. Do not enable plan changes or prorations; this implementation deliberately supports one subscription variant and one refill variant.
 
 ## Staging and load test
 
