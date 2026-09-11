@@ -118,7 +118,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
               {register ? "Create your Peritia account" : "Welcome to Peritia"}
             </DialogTitle>
             <DialogDescription>
-              Sign in for explanations from your local AI model.
+              Sign in for AI-assisted source explanations.
             </DialogDescription>
           </DialogHeader>
           <form className="account-form" onSubmit={submit}>
@@ -147,8 +147,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
             </label>
             {register && (
               <small>
-                At least 12 characters. Email addresses are not verified by this
-                MVP.
+                At least 12 characters.
               </small>
             )}
             {error && (
@@ -212,6 +211,10 @@ export function AccountControl() {
         body: "{}",
       });
       if (!response.ok) throw new Error("Could not sign out. Please retry.");
+      for (let index = sessionStorage.length - 1; index >= 0; index--) {
+        const key = sessionStorage.key(index);
+        if (key?.startsWith("peritia:explanation:")) sessionStorage.removeItem(key);
+      }
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not sign out.");

@@ -12,7 +12,7 @@ import {
   type RequestHandler,
 } from "express";
 import type { Config } from "./config";
-import { Store, type User } from "./store";
+import { AuthStore, User } from "./auth-store";
 import { RepoError } from "../lib/repository";
 
 const lifetime = 8 * 60 * 60;
@@ -70,7 +70,7 @@ export function cookie(req: Request, name: string) {
     ?.slice(name.length + 1);
   return value || "";
 }
-// Bounded memory and per-process limits. Deploy one app instance with this SQLite MVP.
+// Bounded in-memory, per-process rate limiter for the initial single-instance deployment.
 export function limiter(
   max: number,
   windowMs: number,
@@ -133,7 +133,7 @@ export function createGoogleTokenVerifier(keys: JWTVerifyGetKey = googleKeys) {
 export const verifyGoogleToken = createGoogleTokenVerifier();
 export function createAuth(
   config: Config,
-  store: Store,
+  store: AuthStore,
   googleVerify = verifyGoogleToken,
 ) {
   const router = Router();
@@ -151,21 +151,33 @@ export function createAuth(
     provider: u.google_sub ? "google" : "password",
   });
   const dummy = hashPassword(random()); // Same KDF work for unknown accounts.
-  async function issue(user: User, res: Response) {
-    store.prune();
-    const sid = random();
-    const token = await new SignJWT({ sid })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setIssuer(config.origin)
-      .setAudience("peritia")
-      .setSubject(user.id)
-      .setIssuedAt()
-      .setExpirationTime(`${lifetime}s`)
-      .sign(key);
-    store.session(sid, user.id, Date.now() + lifetime * 1000);
-    res.cookie(name, token, { ...options, maxAge: lifetime * 1000 });
-    return publicUser(user);
-  }
+ async function issue(user: User, res: Response) {
+  await store.prune();
+
+  const sid = random();
+
+  const token = await new SignJWT({ sid })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(config.origin)
+    .setAudience("peritia")
+    .setSubject(user.id)
+    .setIssuedAt()
+    .setExpirationTime(`${lifetime}s`)
+    .sign(key);
+
+  await store.session(
+    sid,
+    user.id,
+    Date.now() + lifetime * 1_000,
+  );
+
+  res.cookie(name, token, {
+    ...options,
+    maxAge: lifetime * 1_000,
+  });
+
+  return publicUser(user);
+}
   async function session(req: Request) {
     try {
       const { payload } = await jwtVerify(cookie(req, name), key, {
@@ -175,7 +187,11 @@ export function createAuth(
         requiredClaims: ["exp", "iat", "sub", "sid"],
       });
       if (typeof payload.sid !== "string" || !payload.sub) return null;
-      const user = store.sessionUser(payload.sid, payload.sub, Date.now());
+const user = await store.sessionUser(
+  payload.sid,
+  payload.sub,
+  Date.now(),
+);
       return user ? { user, sid: payload.sid } : null;
     } catch {
       return null;
@@ -188,6 +204,11 @@ export function createAuth(
       return;
     }
     res.locals.user = publicUser(current.user);
+    next();
+  };
+  const optional: RequestHandler = async (req, res, next) => {
+    const current = await session(req);
+    if (current) res.locals.user = publicUser(current.user);
     next();
   };
   router.get("/session", async (req, res) => {
@@ -208,16 +229,38 @@ export function createAuth(
       const email = emailInput(req.body?.email);
       if (req.path === "/register") {
         const password = await hashPassword(req.body?.password);
-        if (store.byEmail(email))
-          throw new RepoError(
-            "Unable to create this account. Try signing in with your original method.",
-            409,
-          );
-        res
-          .status(201)
-          .json({ user: await issue(store.createUser(email, password), res) });
+if (await store.byEmail(email)) {
+  throw new RepoError(
+    "Unable to create this account. Try signing in with your original method.",
+    409,
+  );
+}
+
+let user: User;
+
+try {
+  user = await store.createUser(email, password);
+} catch (error) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505"
+  ) {
+    throw new RepoError(
+      "Unable to create this account. Try signing in with your original method.",
+      409,
+    );
+  }
+
+  throw error;
+}
+
+res.status(201).json({
+  user: await issue(user, res),
+});
       } else {
-        const user = store.byEmail(email);
+        const user = await store.byEmail(email);
         const valid = await verifyPassword(
           req.body?.password,
           user?.password || (await dummy),
@@ -235,18 +278,20 @@ export function createAuth(
   });
   router.post("/logout", async (req, res) => {
     const current = await session(req);
-    if (current) store.revoke(current.sid);
+    if (current) {
+      await store.revoke(current.sid);
+    }
     res.clearCookie(name, options);
     res.json({ ok: true });
   });
-  router.get("/google", rate, (req, res) => {
+  router.get("/google", rate, async (req, res) => {
     if (!config.googleClientId)
       throw new RepoError("Google sign-in has not been configured.", 503);
     const state = random(),
       browser = random(),
       nonce = random(),
       verifier = random();
-    store.saveOAuth(digest(state), digest(browser), nonce, verifier);
+    await store.saveOAuth(digest(state), digest(browser), nonce, verifier);
     res.cookie("peritia_oauth", browser, { ...options, maxAge: 600000 });
     const params = new URLSearchParams({
       client_id: config.googleClientId,
@@ -270,7 +315,7 @@ export function createAuth(
         typeof req.query.code !== "string"
       )
         throw new Error("Invalid callback");
-      const transaction = store.takeOAuth(
+      const transaction = await store.takeOAuth(
         digest(req.query.state),
         digest(cookie(req, "peritia_oauth")),
       );
@@ -302,15 +347,15 @@ export function createAuth(
         typeof identity.sub !== "string"
       )
         throw new Error("Invalid identity");
-      let user = store.byGoogle(identity.sub);
+      let user = await store.byGoogle(identity.sub);
       if (!user) {
         const email = emailInput(identity.email);
         // Never merge an unverified password identity into a Google identity by email alone.
-        if (store.byEmail(email)) {
+        if (await store.byEmail(email)) {
           res.redirect(config.origin + "/?auth_error=existing_account");
           return;
         }
-        user = store.createUser(email, null, identity.sub);
+        user = await store.createUser(email, null, identity.sub);
       }
       await issue(user, res);
       res.redirect(config.origin + "/");
@@ -318,5 +363,5 @@ export function createAuth(
       res.redirect(config.origin + "/?auth_error=google_failed");
     }
   });
-  return { router, required };
+  return { router, required, optional };
 }

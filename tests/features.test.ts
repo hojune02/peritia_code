@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { SignJWT, decodeJwt, generateKeyPair } from "jose";
-import { createApp } from "../server/app";
+import { createApp, type RepositoryEndpoints } from "../server/app";
 import { Store } from "../server/store";
 import { getConfig } from "../server/config";
 import {
@@ -17,6 +17,11 @@ import {
 } from "../server/auth";
 import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
+import { demoGuide } from "../lib/demo";
+import { chunkExplanationFile, makeCacheKey } from "../server/explanations";
+import { verifyWebhook, type BillingService } from "../server/billing";
+import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
+import { createHmac } from "node:crypto";
 
 const config = getConfig({
   APP_ORIGIN: "http://localhost:5173",
@@ -45,11 +50,143 @@ const input = {
   level: "beginner",
 };
 const nativeFetch = globalThis.fetch;
+
+test("durable cache keys cover every generation input", () => {
+  const input = {
+    repositoryId: "1", commit: "a".repeat(40), path: "a.ts",
+    startLine: 1, endLine: 80, contentHash: "b".repeat(64),
+    contextHash: "c".repeat(64), level: "beginner",
+    modelDigest: "sha256:model", promptVersion: "v1",
+    options: { temperature: 0, num_ctx: 8192 },
+  };
+  const original = makeCacheKey(input);
+  assert.equal(original.length, 64);
+  assert.notEqual(original, makeCacheKey({ ...input, level: "technical" }));
+  assert.notEqual(original, makeCacheKey({ ...input, modelDigest: "sha256:new" }));
+});
+
+test("whole-file explanation chunks cover every line without gaps", () => {
+  const lines = Array.from({ length: 181 }, (_, index) => `line ${index + 1}`);
+  assert.deepEqual(chunkExplanationFile(lines), [
+    { first: 1, last: 80 },
+    { first: 81, last: 160 },
+    { first: 161, last: 181 },
+  ]);
+
+  const denseLines = ["a".repeat(7_000), "b".repeat(6_000), "tail"];
+  assert.deepEqual(chunkExplanationFile(denseLines), [
+    { first: 1, last: 1 },
+    { first: 2, last: 3 },
+  ]);
+  assert.throws(
+    () => chunkExplanationFile(["x".repeat(12_001)]),
+    /line that is too large/,
+  );
+});
+
+test("billing webhook verification rejects malformed and altered signatures", () => {
+  const body = Buffer.from('{"event":"subscription_created"}');
+  const secret = "test-webhook-secret";
+  const signature = createHmac("sha256", secret).update(body).digest("hex");
+  assert.equal(verifyWebhook(body, signature, secret), true);
+  assert.equal(verifyWebhook(Buffer.from(body + "x"), signature, secret), false);
+  assert.equal(verifyWebhook(body, "not-hex", secret), false);
+});
+
+test("Gemini streaming preserves partial output and reports provider usage", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+    GEMINI_MODEL: "gemini-3.5-flash-lite",
+    AI_MODEL_REVISION: "test-revision",
+  });
+  const events = [
+    { candidates: [{ content: { parts: [{ text: "Lines 1–2: Imports " }] } }] },
+    {
+      candidates: [{ content: { parts: [{ text: "the module." }] }, finishReason: "STOP" }],
+      modelVersion: "gemini-3.5-flash-lite-001",
+      usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 400, thoughtsTokenCount: 25, totalTokenCount: 2425 },
+    },
+  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+  const partial: string[] = [];
+  const generated = await generateWithGemini(
+    geminiConfig,
+    { system: "system", user: "user" },
+    async (text) => { partial.push(text); },
+    async (_url, init) => {
+      assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "test-api-key");
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.generationConfig.responseJsonSchema, undefined);
+      assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "minimal");
+      return new Response(events, { headers: { "Content-Type": "text/event-stream" } });
+    },
+  );
+  assert.equal(generated.text, "Lines 1–2: Imports the module.");
+  assert.equal(generated.modelVersion, "gemini-3.5-flash-lite-001");
+  assert.equal(generated.complete, true);
+  assert.deepEqual(generated.usage, { inputTokens: 2000, outputTokens: 400, thoughtTokens: 25, totalTokens: 2425 });
+  assert.deepEqual(partial, ["Lines 1–2: Imports ", "Lines 1–2: Imports the module."]);
+  assert.equal(estimateGeminiCost(generated.usage, {
+    GEMINI_INPUT_USD_PER_MILLION: "0.10",
+    GEMINI_OUTPUT_USD_PER_MILLION: "0.40",
+  }), 0.00037);
+});
+
+test("Gemini returns received text when a stream ends before normal completion", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+    GEMINI_MODEL: "gemini-3.5-flash-lite",
+  });
+  const event = `data: ${JSON.stringify({
+    candidates: [{ content: { parts: [{ text: "Lines 1–4: Partial explanation" }] }, finishReason: "MAX_TOKENS" }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 },
+  })}\n\n`;
+  const generated = await generateWithGemini(
+    geminiConfig,
+    { system: "system", user: "user" },
+    async () => undefined,
+    async () => new Response(event),
+  );
+  assert.equal(generated.text, "Lines 1–4: Partial explanation");
+  assert.equal(generated.complete, false);
+  assert.equal(generated.completionReason, "MAX_TOKENS");
+});
+
+test("Gemini failures retain provider-reported token usage for cost accounting", async () => {
+  const geminiConfig = getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "test-api-key",
+  });
+  const event = `data: ${JSON.stringify({
+    candidates: [{ finishReason: "MAX_TOKENS" }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 },
+  })}\n\n`;
+  await assert.rejects(
+    generateWithGemini(
+      geminiConfig,
+      { system: "system", user: "user" },
+      async () => undefined,
+      async () => new Response(event),
+    ),
+    (error: unknown) => error instanceof GeminiGenerationError
+      && error.message === "GEMINI_FINISH_MAX_TOKENS"
+      && error.usage?.totalTokens === 150,
+  );
+});
 async function fixture(
   t: TestContext,
   options: {
     googleVerify?: typeof verifyGoogleToken;
     production?: boolean;
+    repositories?: RepositoryEndpoints;
+    billing?: BillingService;
   } = {},
 ) {
   const store = new Store(":memory:");
@@ -57,6 +194,7 @@ async function fixture(
   const settings = {
     ...config,
     production: options.production ?? false,
+    billingEnabled: Boolean(options.billing),
     googleClientId: "test-client",
     googleClientSecret: "test-secret",
   };
@@ -66,6 +204,8 @@ async function fixture(
       explanations++;
       return { ...output, status: "generated" } as Explanation;
     },
+    repositories: options.repositories,
+    billing: options.billing,
   });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -93,12 +233,24 @@ async function fixture(
     });
   const get = (path: string, token = "") =>
     nativeFetch(url + path, { headers: { Cookie: token }, redirect: "manual" });
+  const put = (path: string, body: unknown, token = "") =>
+    nativeFetch(url + path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Origin: origin, Cookie: token },
+      body: JSON.stringify(body),
+    });
+  const del = (path: string, token = "") =>
+    nativeFetch(url + path, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Origin: origin, Cookie: token },
+      body: "{}",
+    });
   const register = async (email = "person@example.com") => {
     const response = await post("/api/auth/register", { email, password });
     assert.equal(response.status, 201);
     return response.headers.get("set-cookie")!.split(";")[0];
   };
-  return { store, post, get, register, count: () => explanations };
+  return { store, post, put, del, get, register, count: () => explanations };
 }
 
 test("passwords are salted, hashed, and checked; bounds prevent oversized KDF input", async () => {
@@ -166,6 +318,79 @@ test("credential HTTP flow: register, reload session, logout/replay, login and w
     ).status,
     409,
   );
+});
+test("repository library endpoints use the authenticated account identity", async (t) => {
+  const listed: string[] = [];
+  const opened: string[] = [];
+  const reviewed: string[] = [];
+  const removed: string[] = [];
+  const repositories: RepositoryEndpoints = {
+    save: async () => undefined,
+    list: async (userId) => {
+      listed.push(userId);
+      return [];
+    },
+    open: async (userId) => {
+      opened.push(userId);
+      return { guide: demoGuide, reviewedPaths: [] };
+    },
+    remove: async (userId) => {
+      removed.push(userId);
+      return { ok: true };
+    },
+    setReviewed: async (userId) => {
+      reviewed.push(userId);
+      return { ok: true };
+    },
+  };
+  const f = await fixture(t, { repositories });
+  const firstCookie = await f.register("first@example.com");
+  const secondCookie = await f.register("second@example.com");
+  const first = await (await f.get("/api/auth/session", firstCookie)).json();
+  const second = await (await f.get("/api/auth/session", secondCookie)).json();
+  assert.equal((await f.get("/api/repositories")).status, 401);
+  assert.equal((await f.get("/api/repositories", firstCookie)).status, 200);
+  assert.equal((await f.get("/api/repositories", secondCookie)).status, 200);
+  assert.equal((await f.get("/api/repositories/123", firstCookie)).status, 200);
+  assert.equal((await f.del("/api/repositories/123")).status, 401);
+  assert.equal((await f.del("/api/repositories/123", firstCookie)).status, 200);
+  assert.equal((await f.put("/api/repositories/files/reviewed", {
+    repo: "https://github.com/example/repo",
+    commit: "a".repeat(40),
+    path: "src/main.ts",
+    reviewed: true,
+  }, secondCookie)).status, 200);
+  assert.deepEqual(listed, [first.user.id, second.user.id]);
+  assert.deepEqual(opened, [first.user.id]);
+  assert.deepEqual(removed, [first.user.id]);
+  assert.deepEqual(reviewed, [second.user.id]);
+});
+test("billing checkout requires authentication, validates purchase type, and uses account identity", async (t) => {
+  const purchases: Array<{ userId: string; kind: string }> = [];
+  const cancellations: string[] = [];
+  const billing = {
+    webhook: (_req: any, res: any) => res.json({ accepted: true }),
+    checkout: async (user: { id: string }, kind: string) => {
+      purchases.push({ userId: user.id, kind });
+      return { url: "https://example.lemonsqueezy.com/checkout" };
+    },
+    portal: async () => ({ url: "https://example.lemonsqueezy.com/billing" }),
+    cancel: async (userId: string) => {
+      cancellations.push(userId);
+      return { status: "cancelled", endsAt: "2030-01-01T00:00:00.000Z" };
+    },
+  } as unknown as BillingService;
+  const f = await fixture(t, { billing });
+  const cookie = await f.register("billing@example.com");
+  const session = await (await f.get("/api/auth/session", cookie)).json();
+  assert.equal((await f.post("/api/billing/checkout", { kind: "subscription" })).status, 401);
+  assert.equal((await f.post("/api/billing/cancel", {})).status, 401);
+  assert.equal((await f.post("/api/billing/checkout", { kind: "credits" }, cookie)).status, 400);
+  const response = await f.post("/api/billing/checkout", { kind: "topup" }, cookie);
+  assert.equal(response.status, 200);
+  assert.deepEqual(purchases, [{ userId: session.user.id, kind: "topup" }]);
+  assert.equal((await f.post("/api/billing/cancel", {}, cookie)).status, 200);
+  assert.deepEqual(cancellations, [session.user.id]);
 });
 test("JWT: unsigned, tampered, expired, wrong-audience, wrong-issuer tokens are rejected", async (t) => {
   const f = await fixture(t);
@@ -621,9 +846,30 @@ test("configuration refuses weak secrets, paid/cloud endpoints, and non-HTTPS pr
     { JWT_SECRET: "weak" },
     { OLLAMA_URL: "https://api.openai.com" },
     { OLLAMA_MODEL: "model:cloud" },
+    { AI_PROVIDER: "gemini" },
+    { GEMINI_BILLING_TIER: "unknown" },
+    { BILLING_ENABLED: "true" },
+    {
+      BILLING_ENABLED: "true",
+      LEMONSQUEEZY_API_KEY: "key",
+      LEMONSQUEEZY_STORE_ID: "store-not-a-number",
+      LEMONSQUEEZY_PRO_VARIANT_ID: "100",
+      LEMONSQUEEZY_TOPUP_VARIANT_ID: "200",
+      LEMONSQUEEZY_WEBHOOK_SECRET: "secret",
+    },
     { NODE_ENV: "production", APP_ORIGIN: "http://localhost:3001" },
   ])
     assert.throws(() =>
       getConfig({ APP_ORIGIN: origin, JWT_SECRET: config.secret, ...change }),
     );
+  assert.equal(getConfig({
+    APP_ORIGIN: origin,
+    JWT_SECRET: config.secret,
+    BILLING_ENABLED: "true",
+    LEMONSQUEEZY_API_KEY: "key",
+    LEMONSQUEEZY_STORE_ID: "42",
+    LEMONSQUEEZY_PRO_VARIANT_ID: "100",
+    LEMONSQUEEZY_TOPUP_VARIANT_ID: "200",
+    LEMONSQUEEZY_WEBHOOK_SECRET: "secret",
+  }).billingEnabled, true);
 });

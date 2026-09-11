@@ -9,6 +9,7 @@ import {
 } from "../lib/repository";
 import { demoGuide } from "../lib/demo";
 import { analyzeRepository, readSource } from "../server/github";
+import { detectSourceLanguage } from "../lib/source-language";
 
 test("accepts HTTPS GitHub repositories and owner/name shorthand", () => {
   assert.deepEqual(
@@ -19,6 +20,12 @@ test("accepts HTTPS GitHub repositories and owner/name shorthand", () => {
     owner: "expressjs",
     name: "express",
   });
+});
+test("detects source languages from filenames without rewriting source", () => {
+  assert.deepEqual(detectSourceLanguage("src/App.tsx"), { grammar: "tsx", label: "TSX" });
+  assert.deepEqual(detectSourceLanguage("scripts/deploy.py"), { grammar: "python", label: "Python" });
+  assert.deepEqual(detectSourceLanguage("Dockerfile"), { grammar: "docker", label: "Dockerfile" });
+  assert.deepEqual(detectSourceLanguage("LICENSE"), { grammar: "plain", label: "Text" });
 });
 test("rejects arbitrary hosts, credentials, ports, branch URLs, and malformed inputs", () => {
   for (const value of [
@@ -141,7 +148,7 @@ test("GitHub ingestion pins the commit and derives technology from fetched files
     const guide = await analyzeRepository("testing/fixture");
     assert.equal(guide.commit, sha);
     assert.equal(guide.files.length, 2);
-    assert.equal(guide.sources.length, 2);
+    assert.equal(guide.sources.length, 1);
     assert.ok(guide.technologies.some((t) => t.name === "React"));
     assert.ok(
       paths

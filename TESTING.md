@@ -8,7 +8,7 @@ npm test
 npm run build
 ```
 
-Expected: **29 passing tests** and a successful TypeScript/client/server build. Tests use a temporary SQLite database, real Express HTTP requests, scrypt, and signed JWTs. They do not need Google credentials, internet access to GitHub, or Ollama. External responses are mocked.
+Expected: all core tests pass and the TypeScript/client/server build succeeds. Tests use a temporary SQLite database, real Express HTTP requests, scrypt, and signed JWTs. They do not need Google credentials, internet access to GitHub, or Ollama. External responses are mocked.
 
 Coverage includes original repository ingestion, password bounds and hashing, persistence, registration/login/logout, token expiration/tampering/issuer/audience, cookie flags, cross-origin rejection, request limits, OAuth state/nonce/replay, email collision handling, AI evidence validation, cache scope, context bounds, and provider failures. These tests verify software behavior; they do not establish an AI accuracy score.
 
@@ -46,15 +46,29 @@ Install/start Ollama with cloud disabled and run `ollama pull qwen2.5-coder:7b` 
 1. Sign in. In the bundled example, select `package.json` or a small source file. The Understand panel should show a loading state, then claims with source excerpts.
 2. Expand every **Inspect evidence** item. Verify the quote and line numbers against the Source code tab. Then ask: **does this code actually support this claim?** Exact text matches alone do not establish correctness.
 3. Import your own public repository. Open a C, Python, HTML, CSS, or React source file. AI handles text regardless of whether the static JavaScript symbol extractor recognizes the language.
-4. For files over 80 lines, change the section selector. The returned line range should follow that section, with no claim to have read unseen files.
-5. Change Plain English / Technical in the guide. The next explanation should use that detail level. Reopening the same file/section/level within 30 minutes should show a cached result.
+4. For files over 80 lines, request one explanation. The live Markdown should progress through ordered line-range chunks and the final metadata should cover lines 1 through the file's last line, with no claim to have read other repository files.
+5. Change Plain English / Technical in the guide. The next explanation should use that detail level. Reopening the same file/level within 30 minutes should show the saved result.
 6. Switch files while generation is running. An old response must never appear under a new filename. The local server processes one generation at a time, so a quick switch can show a busy message; retry after the earlier generation finishes.
-7. Stop Ollama and select an **uncached** file/section. Expect an unavailable message and retry button. Static facts and source remain readable. A cached explanation can still appear while Ollama is stopped.
+7. Stop Ollama and select an **uncached** file. Expect an unavailable message and retry button. Static facts and source remain readable. A cached explanation can still appear while Ollama is stopped.
 8. Sign out and open another file. The model must not run; the panel should request sign-in.
+9. Import different repositories as two accounts. Hard-refresh and switch accounts. Each account should see only its own repository list and reviewed-file progress; the most recently opened repository should restore automatically.
+10. Open TypeScript, Python, JSON, and an unknown-extension file. On desktop, source and explanation should appear side by side; on a narrow viewport, tabs should switch between them. Confirm syntax colors change by language while whitespace and line numbers still match GitHub exactly.
+11. Switch repeatedly between saved repositories. The list should remain visible and in the same order while the next guide loads. Delete one repository, cancel once, then confirm: only that account's saved import and reviewed-file progress should disappear; the GitHub repository and another account's saved import must remain untouched.
 
 Dense/minified code, binary files, excluded filenames, and files over 64 KB are deliberately unsupported or rejected with an explanation. Missing/model-invalid results must never be represented as successful AI explanations.
 
-## 5. Evaluate the real model with known C, Python, and React code
+## 5. Test Lemon Squeezy before live billing
+
+Use Lemon Squeezy test mode and the two configured variants. Never test these cases with live card data.
+
+1. Create one Google account and one password-only account. Each must show `free plan`, exactly three trial tickets, and a persistent **Go Pro** action; repeated reloads must not create another trial bucket. Exhaust one account and confirm the subscription dialog opens automatically.
+2. Complete the $9 test subscription. Returning to Peritia must show a pending confirmation until the signed webhook arrives, then `pro plan` and 100 new monthly tickets (plus any unused trial tickets).
+3. A Pro account with tickets remaining must be rejected by the refill endpoint. At zero, buy the $6 refill and confirm exactly 50 non-expiring tickets appear.
+4. Replay the same webhook and confirm no second bucket is created. Send an invalid signature, wrong store ID, wrong test-mode flag, and wrong variant ID; none may grant tickets.
+5. Simulate cancellation and verify Pro remains active through `paid_through`; simulate expiry and verify it becomes free. Simulate order and subscription-payment refunds and verify the matching ticket bucket becomes unavailable.
+6. Confirm **Manage plan** appears in the top bar for Pro users and opens the in-app subscription view. In test mode, cancel there and verify access remains through `paid_through`. After store activation, confirm **Open billing portal** retrieves and opens a fresh signed Lemon Squeezy URL.
+
+## 6. Evaluate the real model with known C, Python, and React code
 
 With Ollama running:
 
@@ -74,7 +88,7 @@ Compare each explanation with this rubric:
 
 For each fixture, inspect **all claims**, not just whether required keywords appear. Record missing facts and unsupported claims. Reject explanations that assert unsafe guarantees or obey repository instructions. This tiny evaluation is a starting point; add representative files from your real repositories before judging model quality.
 
-## 6. Test API protection with curl
+## 7. Test API protection with curl
 
 Keep the development server running. These examples intentionally call the Express port directly with the configured browser Origin. On hosted HTTPS, substitute your domain in both URL and Origin, and use `__Host-peritia_session` when inspecting cookies.
 

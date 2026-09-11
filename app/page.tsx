@@ -1,6 +1,9 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
+  useEffect,
   useRef,
   useState,
   type FormEvent,
@@ -32,6 +35,7 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   X,
   Info,
 } from "lucide-react";
@@ -61,9 +65,10 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoGuide } from "@/lib/demo";
-import { AccountControl } from "@/components/account";
+import { AccountControl, useAccount } from "@/components/account";
+import { GoProButton } from "@/components/billing";
 import { AIExplanation } from "@/components/ai-explanation";
 import {
   describePath,
@@ -71,8 +76,12 @@ import {
   summarizeSource,
   type Guide,
   type RepoFile,
+  type SavedRepository,
   type Tech,
 } from "@/lib/repository";
+import { detectSourceLanguage } from "@/lib/source-language";
+
+const SourceCodeViewer = lazy(() => import("@/components/source-code-viewer"));
 
 type Section = "overview" | "architecture" | "files" | "technology" | "start";
 const sections = [
@@ -108,12 +117,24 @@ function RepoNavigation({
   onSection,
   onImport,
   onAbout,
+  repositories,
+  repositoriesLoading,
+  signedIn,
+  onRepository,
+  deletingRepositoryId,
+  onDeleteRepository,
 }: {
   guide: Guide;
   section: Section;
   onSection: (s: Section) => void;
   onImport: () => void;
   onAbout: () => void;
+  repositories: SavedRepository[];
+  repositoriesLoading: boolean;
+  signedIn: boolean;
+  onRepository: (repository: SavedRepository) => void;
+  deletingRepositoryId: string | null;
+  onDeleteRepository: (repository: SavedRepository) => void;
 }) {
   const { setOpenMobile } = useSidebar();
   return (
@@ -141,6 +162,62 @@ function RepoNavigation({
           <button className="new-repo" onClick={onImport}>
             <Plus size={15} /> Import repository
           </button>
+        </div>
+        <div className="saved-repositories" aria-label="Saved repositories">
+          <span className="overline">YOUR REPOSITORIES</span>
+          {repositoriesLoading ? (
+            <p className="saved-repositories-note">Loading repositories…</p>
+          ) : repositories.length ? (
+            <div className="saved-repository-list">
+              {repositories.map((repository) => (
+                <div
+                  key={repository.repositoryId}
+                  className={
+                    !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                      && guide.name.toLowerCase() === repository.name.toLowerCase()
+                      ? "saved-repository active"
+                      : "saved-repository"
+                  }
+                  title={`${repository.owner}/${repository.name}`}
+                >
+                  <button
+                    className="saved-repository-open"
+                    onClick={() => {
+                      onRepository(repository);
+                      setOpenMobile(false);
+                    }}
+                    aria-current={
+                      !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                        && guide.name.toLowerCase() === repository.name.toLowerCase()
+                        ? "page"
+                        : undefined
+                    }
+                  >
+                    <Github size={14} />
+                    <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
+                    <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
+                      {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
+                    </small>
+                  </button>
+                  <button
+                    className="saved-repository-delete"
+                    onClick={() => onDeleteRepository(repository)}
+                    disabled={deletingRepositoryId === repository.repositoryId}
+                    aria-label={`Delete ${repository.owner}/${repository.name} from your repositories`}
+                    title="Delete saved repository"
+                  >
+                    {deletingRepositoryId === repository.repositoryId
+                      ? <Loader2 size={14} className="spin" />
+                      : <Trash2 size={14} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="saved-repositories-note">
+              {signedIn ? "Import a repository to save it here." : "Sign in to keep repositories across devices."}
+            </p>
+          )}
         </div>
         <div className="guide-nav">
           <span className="overline">YOUR GUIDE</span>
@@ -370,6 +447,7 @@ function FileTree({
 }
 
 export default function Home() {
+  const account = useAccount();
   const [guide, setGuide] = useState<Guide>(demoGuide);
   const [section, setSection] = useState<Section>("overview");
   const [importOpen, setImportOpen] = useState(false);
@@ -386,13 +464,110 @@ export default function Home() {
   const [sourceError, setSourceError] = useState("");
   const [read, setRead] = useState<string[]>([]);
   const [copyState, setCopyState] = useState(false);
+  const [repositories, setRepositories] = useState<SavedRepository[]>([]);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+  const [deletingRepositoryId, setDeletingRepositoryId] = useState<string | null>(null);
+  const [repositoryError, setRepositoryError] = useState("");
 
-  // Add this:
   const [sourceTab, setSourceTab] = useState<"explanation" | "source">(
     "explanation",
   );
   const sourceRequest = useRef(0);
+  const libraryRequest = useRef(0);
   const abort = useRef<AbortController | null>(null);
+  const showGuide = (next: Guide, reviewedPaths: string[] = []) => {
+    sourceRequest.current++;
+    setGuide(next);
+    setSourcePath(null);
+    setSourceContent("");
+    setSourceError("");
+    setSourceLoading(false);
+    setRead(reviewedPaths);
+    setQuery("");
+    setSection("overview");
+  };
+  const openSavedRepository = async (repository: SavedRepository, request = ++libraryRequest.current) => {
+    setRepositoryError("");
+    try {
+      const response = await fetch(`/api/repositories/${encodeURIComponent(repository.repositoryId)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not restore this repository.");
+      if (request === libraryRequest.current) {
+        showGuide(data.guide, Array.isArray(data.reviewedPaths) ? data.reviewedPaths : []);
+      }
+    } catch (reason) {
+      if (request === libraryRequest.current)
+        setRepositoryError(reason instanceof Error ? reason.message : "Could not restore this repository.");
+    }
+  };
+  const deleteSavedRepository = async (repository: SavedRepository) => {
+    const confirmed = window.confirm(
+      `Delete ${repository.owner}/${repository.name} from your Peritia repositories?\n\nThis removes your saved import and reading progress. It does not delete the GitHub repository.`,
+    );
+    if (!confirmed) return;
+    const request = ++libraryRequest.current;
+    setDeletingRepositoryId(repository.repositoryId);
+    setRepositoryError("");
+    try {
+      const response = await fetch(`/api/repositories/${encodeURIComponent(repository.repositoryId)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not delete this repository.");
+      const remaining = repositories.filter((item) => item.repositoryId !== repository.repositoryId);
+      setRepositories(remaining);
+      const deletingCurrent = !guide.sample
+        && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+        && guide.name.toLowerCase() === repository.name.toLowerCase();
+      if (deletingCurrent && request === libraryRequest.current) {
+        if (remaining[0]) await openSavedRepository(remaining[0], request);
+        else showGuide(demoGuide);
+      }
+    } catch (reason) {
+      setRepositoryError(reason instanceof Error ? reason.message : "Could not delete this repository.");
+    } finally {
+      setDeletingRepositoryId(null);
+    }
+  };
+  const refreshRepositories = async () => {
+    if (!account.user) return;
+    const request = libraryRequest.current;
+    const response = await fetch("/api/repositories");
+    const data = await response.json();
+    if (request === libraryRequest.current && response.ok && Array.isArray(data.repositories))
+      setRepositories(data.repositories);
+  };
+
+  useEffect(() => {
+    const request = ++libraryRequest.current;
+    showGuide(demoGuide);
+    setRepositories([]);
+    setDeletingRepositoryId(null);
+    setRepositoryError("");
+    if (!account.ready || !account.user) {
+      setRepositoriesLoading(false);
+      return;
+    }
+    setRepositoriesLoading(true);
+    void fetch("/api/repositories")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load saved repositories.");
+        const saved = Array.isArray(data.repositories) ? data.repositories as SavedRepository[] : [];
+        if (request !== libraryRequest.current) return;
+        setRepositories(saved);
+        setRepositoriesLoading(false);
+        if (saved[0]) return openSavedRepository(saved[0], request);
+      })
+      .catch((reason) => {
+        if (request === libraryRequest.current) {
+          setRepositoriesLoading(false);
+          setRepositoryError(reason instanceof Error ? reason.message : "Could not load saved repositories.");
+        }
+      });
+  }, [account.ready, account.user?.id]);
   const navigate = (s: Section) => {
     setSection(s);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -421,13 +596,10 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error || "The repository couldn't be analyzed.");
-      setGuide(data);
-      setSourcePath(null);
-      setRead([]);
-      setQuery("");
-      setSection("overview");
+      showGuide(data);
       setImportOpen(false);
       setRepoInput("");
+      if (account.user) void refreshRepositories();
     } catch (e) {
       setError(
         e instanceof Error && e.name !== "AbortError"
@@ -473,6 +645,35 @@ export default function Home() {
     } finally {
       if (request === sourceRequest.current) setSourceLoading(false);
     }
+  }
+  function toggleReviewed(path: string) {
+    const reviewed = !read.includes(path);
+    setRead((current) => reviewed
+      ? [...new Set([...current, path])]
+      : current.filter((item) => item !== path));
+    if (!account.user || guide.sample) return;
+    const adjustCount = (change: number) => setRepositories((current) => current.map((repository) =>
+      repository.owner.toLowerCase() === guide.owner.toLowerCase()
+        && repository.name.toLowerCase() === guide.name.toLowerCase()
+        && repository.commit === guide.commit
+        ? { ...repository, reviewedCount: Math.max(0, repository.reviewedCount + change) }
+        : repository));
+    adjustCount(reviewed ? 1 : -1);
+    void fetch("/api/repositories/files/reviewed", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: guide.url, commit: guide.commit, path, reviewed }),
+    }).then(async (response) => {
+      if (response.ok) return;
+      const body = await response.json();
+      throw new Error(body.error || "Could not save file progress.");
+    }).catch((reason) => {
+      setRead((current) => reviewed
+        ? current.filter((item) => item !== path)
+        : [...new Set([...current, path])]);
+      adjustCount(reviewed ? -1 : 1);
+      setRepositoryError(reason instanceof Error ? reason.message : "Could not save file progress.");
+    });
   }
   function downloadGuide() {
     const text = [
@@ -548,6 +749,12 @@ export default function Home() {
           setImportOpen(true);
         }}
         onAbout={() => setAboutOpen(true)}
+        repositories={repositories}
+        repositoriesLoading={repositoriesLoading}
+        signedIn={!!account.user}
+        onRepository={(repository) => void openSavedRepository(repository)}
+        deletingRepositoryId={deletingRepositoryId}
+        onDeleteRepository={(repository) => void deleteSavedRepository(repository)}
       />
       <div className="workspace">
         <header className="topbar">
@@ -562,6 +769,7 @@ export default function Home() {
             </span>
           </div>
           <div className="topbar-actions">
+            <GoProButton />
             <AccountControl />
             {!guide.sample && (
               <a
@@ -606,6 +814,7 @@ export default function Home() {
               </button>
             </form>
           </div>
+          {repositoryError && <p className="repository-library-error" role="alert">{repositoryError}</p>}
           {guide.sample && (
             <div className="sample-label">
               <span className="sample-dot" />
@@ -1029,13 +1238,7 @@ export default function Home() {
                         </button>
                         <button
                           className="review-button"
-                          onClick={() =>
-                            setRead((r) =>
-                              r.includes(f.path)
-                                ? r.filter((p) => p !== f.path)
-                                : [...r, f.path],
-                            )
-                          }
+                          onClick={() => toggleReviewed(f.path)}
                           aria-pressed={read.includes(f.path)}
                         >
                           <span className="review-check">
@@ -1166,49 +1369,63 @@ export default function Home() {
       <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
         <DialogContent className="about-dialog">
           <DialogHeader>
-            <DialogTitle>A guide you can inspect.</DialogTitle>
+            <DialogTitle>How Peritia works today.</DialogTitle>
             <DialogDescription>
-              What Peritia knows—and what it doesn't.
+              What is inspected, what Gemini receives, and what Peritia keeps.
             </DialogDescription>
           </DialogHeader>
           <div className="about-block">
-            <h3>Static structure, optional local AI</h3>
+            <h3>A repository map before AI</h3>
             <p>
-              The repository guide combines a GitHub tree, manifests, and a
-              technology glossary. When signed in, opening a file sends the
-              selected section to the server owner’s local Ollama model. No paid
-              AI provider is used. AI claims include checked source excerpts,
-              but interpretation can still be wrong.
+              Peritia imports public GitHub repositories and pins each guide to
+              a specific commit. It maps the visible file tree, reads one root
+              README and up to eight manifests, and combines those facts with a
+              technology glossary. Other source files are loaded only when you
+              open them.
+            </p>
+          </div>
+          <div className="about-block">
+            <h3>Whole-file explanations, streamed live</h3>
+            <p>
+              When you explicitly request an explanation, the complete selected
+              public file is sent to LLM in ordered chunks of up to 80 lines
+              and 12,000 characters. Gemini's Markdown appears as it arrives,
+              and usable partial output is kept if the provider stops early.
+              LLM receives that file—not the entire repository—and its
+              explanation can still be incomplete or wrong.
             </p>
           </div>
           <div className="about-block">
             <h3>Evidence and inference are different</h3>
             <p>
-              File paths and declared dependencies are observed. Folder
-              descriptions are naming-based inferences. Import and symbol lists
-              are best-effort text extraction, not a complete program analysis.
-              No claim of verified runtime behavior is made.
+              File paths, source text, and declared dependencies are observed.
+              Folder roles, important-file suggestions, imports, and symbol
+              lists are best-effort inferences—not verified architecture or
+              runtime analysis. Always compare AI claims with the commit-pinned
+              source shown beside them.
             </p>
           </div>
           <div className="about-block">
-            <h3>Bounded by design</h3>
+            <h3>Accounts, limits, and stored data</h3>
             <p>
-              Up to 2,500 visible files, 16 initial source reads, and 64 KB per
-              source. Large repositories may be partial. Private repositories,
-              binaries, common secret filenames, dependency folders, and known
-              build outputs are excluded. A missing detection is not proof a
-              technology is absent.
+              PostgreSQL keeps accounts, revocable sessions, saved repository
+              links, reviewed paths, explanation jobs, and usage. Eligible
+              Google accounts start with three beta explanations. Public source,
+              repository snapshots, and matching explanation results may be
+              reused from shared server caches. Deleting a saved repository
+              removes your link and reading progress, but not GitHub's repository
+              or shared cache entries.
             </p>
           </div>
           <div className="about-block">
-            <h3>Snapshot and privacy</h3>
+            <h3>Bounded and non-executing</h3>
             <p>
-              Live guides are pinned to a commit. Results may be cached on the
-              server for five minutes; cache entries can be evicted sooner.
-              Accounts and revocable sessions are stored in SQLite. AI
-              explanations may be cached in memory for 30 minutes. No repository
-              code is executed. Review progress is held only in this page’s
-              session.
+              A guide includes up to 2,500 visible files, and an opened source
+              file may be up to 64 KB. Large repositories can be partial.
+              Private repositories, binaries, common secret filenames,
+              dependency folders, and known build output are excluded. Peritia
+              never executes repository code, and a missing detection does not
+              prove that a technology is absent.
             </p>
           </div>
         </DialogContent>
@@ -1284,22 +1501,47 @@ export default function Home() {
                 : `Pinned to commit ${guide.commit.slice(0, 7)}`}
             </SheetDescription>
           </SheetHeader>
-          <Tabs
-            value={sourceTab}
-            onValueChange={(value) =>
-              setSourceTab(value as "explanation" | "source")
-            }
-            className="source-tabs"
-          >
-            <TabsList>
-              <TabsTrigger value="explanation">Understand</TabsTrigger>
-              <TabsTrigger value="source">Source code</TabsTrigger>
-            </TabsList>
-            <TabsContent
-              value="explanation"
-              forceMount
-              className="source-tab-panel"
-            >
+          <div className="source-mobile-tabs" role="tablist" aria-label="Source notebook view">
+            <button role="tab" aria-selected={sourceTab === "source"} onClick={() => setSourceTab("source")}>Source code</button>
+            <button role="tab" aria-selected={sourceTab === "explanation"} onClick={() => setSourceTab("explanation")}>Understand</button>
+          </div>
+          <div className="source-workspace">
+            <section className="source-code-pane" data-mobile-active={sourceTab === "source"} aria-label="Source code">
+              <div className="source-toolbar">
+                <span>{sourcePath ? detectSourceLanguage(sourcePath).label : "Source"}</span>
+                <button
+                  className="small-link"
+                  disabled={!sourceContent}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(sourceContent);
+                      setCopyState(true);
+                    } catch {
+                      setCopyState(false);
+                      setSourceError("Clipboard isn't available. Select the source text to copy it.");
+                    }
+                  }}
+                >
+                  {copyState ? <><Check size={14} />Copied</> : "Copy source"}
+                </button>
+              </div>
+              {sourceLoading ? (
+                <p className="source-pane-status" role="status"><Loader2 className="spin" size={18} /> Loading source…</p>
+              ) : sourceContent ? (
+                <Suspense fallback={<pre className="source-code source-code-fallback"><code>{sourceContent}</code></pre>}>
+                  <SourceCodeViewer path={sourcePath || ""} code={sourceContent} />
+                </Suspense>
+              ) : (
+                <p className="source-pane-status">Source is unavailable.</p>
+              )}
+              {sourceError && <p role="alert" className="source-pane-error">{sourceError}</p>}
+              {!guide.sample && sourcePath && (
+                <a className="source-original" href={sourceUrl(guide, sourcePath)} target="_blank" rel="noreferrer">
+                  Open original on GitHub <ExternalLink size={15} />
+                </a>
+              )}
+            </section>
+            <section className="source-insight-pane" data-mobile-active={sourceTab === "explanation"} aria-label="Code explanation">
               <div className="source-explanation">
                 {sourcePath && !sourceLoading && !sourceError && (
                   <AIExplanation
@@ -1408,73 +1650,8 @@ export default function Home() {
                   </>
                 )}
               </div>
-            </TabsContent>
-            <TabsContent value="source" forceMount className="source-tab-panel">
-              <div className="source-toolbar">
-                <span>{sourcePath?.split(".").pop()?.toUpperCase()}</span>
-                <button
-                  className="small-link"
-                  disabled={!sourceContent}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(sourceContent);
-                      setCopyState(true);
-                    } catch {
-                      setCopyState(false);
-                      setSourceError(
-                        "Clipboard isn't available. Select the source text to copy it.",
-                      );
-                    }
-                  }}
-                >
-                  {copyState ? (
-                    <>
-                      <Check size={14} />
-                      Copied
-                    </>
-                  ) : (
-                    "Copy source"
-                  )}
-                </button>
-              </div>
-              {sourceLoading ? (
-                <p className="notice" role="status">
-                  Loading source…
-                </p>
-              ) : (
-                <>
-                  <pre className="source-code">
-                    <code>
-                      {sourceContent.split("\n").map((line, i) => (
-                        <span className="code-line" key={i}>
-                          <span className="line-number" aria-hidden="true">
-                            {i + 1}
-                          </span>
-                          <span>{line || " "}</span>
-                        </span>
-                      ))}
-                    </code>
-                  </pre>
-                  {sourceError && (
-                    <p role="alert" className="error-message">
-                      {sourceError}
-                    </p>
-                  )}
-                </>
-              )}
-            </TabsContent>
-          </Tabs>
-          {!guide.sample && sourcePath && (
-            <a
-              className="source-original"
-              href={sourceUrl(guide, sourcePath)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open original on GitHub
-              <ExternalLink size={15} />
-            </a>
-          )}
+            </section>
+          </div>
         </SheetContent>
       </Sheet>
     </SidebarProvider>

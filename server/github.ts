@@ -8,230 +8,669 @@ import {
   type RepoFile,
   type SourceFile,
 } from "../lib/repository";
+import { githubJson } from "./github-client";
+import {
+  encodeGitHubPath,
+  validateCommit,
+  validateSourcePath,
+} from "./github-input";
+import type {
+  RepositorySnapshot,
+  CachedSource,
+} from "./github-cache";
 
-const API = "https://api.github.com";
-const MAX_BODY = 4_000_000;
 const MAX_FILE = 65_536;
-const cache = new Map<string, { expires: number; guide: Guide }>();
+const MAX_VISIBLE_FILES = 2_500;
+const MAX_MANIFESTS = 8;
 
-async function github(path: string): Promise<any> {
-  let response: Response;
-  try {
-    response = await fetch(`${API}${path}`, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "Peritia-Repository-Explorer",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-      redirect: "error",
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch {
-    throw new RepoError(
-      "GitHub could not be reached in time. Please try again shortly.",
-      502,
-    );
+/*
+ * Keep the original bounded memory cache for isolated automated tests.
+ * Development and production use PostgreSQL when
+ * GITHUB_CACHE_MODE=postgres.
+ */
+const memoryCache = new Map<
+  string,
+  {
+    expires: number;
+    guide: Guide;
   }
-  if (!response.ok) {
-    if (response.status === 404)
-      throw new RepoError(
-        "Repository or file not found. Check the spelling and make sure the repository is public.",
-        404,
-      );
-    if (response.status === 403 || response.status === 429)
-      throw new RepoError(
-        "GitHub is temporarily limiting requests. Please try again after the rate limit resets, or explore the built-in example meanwhile.",
-        429,
-      );
-    if (response.status === 409)
-      throw new RepoError(
-        "This repository has no commits yet. Try a repository with source files.",
-      );
-    throw new RepoError(
-      "GitHub couldn't return this repository. Please try again later.",
-      502,
-    );
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new RepoError("GitHub returned an empty response.", 502);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > MAX_BODY) {
-      await reader.cancel();
-      throw new RepoError(
-        "This repository listing is too large for the MVP. Try a smaller repository.",
-        413,
-      );
-    }
-    chunks.push(value);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    throw new RepoError(
-      "GitHub returned an unreadable response. Please retry.",
-      502,
-    );
-  }
+>();
+
+type GitHubRepository = {
+  id?: number | string;
+  private?: boolean;
+  default_branch?: unknown;
+  description?: unknown;
+  stargazers_count?: unknown;
+};
+
+type GitHubCommit = {
+  sha?: unknown;
+};
+
+type GitHubTreeEntry = {
+  path?: unknown;
+  type?: unknown;
+  sha?: unknown;
+  size?: unknown;
+};
+
+type GitHubTree = {
+  tree?: unknown;
+  truncated?: unknown;
+};
+
+type GitHubContent = {
+  type?: unknown;
+  encoding?: unknown;
+  content?: unknown;
+  size?: unknown;
+};
+
+type PersistentCacheModule =
+  typeof import("./github-cache");
+
+function usePersistentCache(): boolean {
+  return process.env.GITHUB_CACHE_MODE === "postgres";
 }
 
-function decodeFile(data: any, path: string): SourceFile {
+async function loadPersistentCache(): Promise<
+  PersistentCacheModule | null
+> {
+  if (!usePersistentCache()) {
+    return null;
+  }
+
+  /*
+   * Dynamic import is intentional. It prevents isolated tests that
+   * use the SQLite in-memory Store from importing PostgreSQL merely
+   * because they import createApp().
+   */
+  return import("./github-cache");
+}
+
+function encodedRepositoryBase(
+  owner: string,
+  name: string,
+): string {
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
+
+function requireRepositoryId(
+  value: unknown,
+): string {
+  if (
+    (typeof value !== "number" &&
+      typeof value !== "string") ||
+    String(value).length === 0
+  ) {
+    throw new RepoError(
+      "GitHub returned an invalid repository identifier.",
+      502,
+    );
+  }
+
+  return String(value);
+}
+
+function requireDefaultBranch(
+  value: unknown,
+): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 255
+  ) {
+    throw new RepoError(
+      "Only public repositories with a default branch can be analyzed.",
+      400,
+    );
+  }
+
+  return value;
+}
+
+function requireTree(value: unknown): GitHubTree {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("tree" in value) ||
+    !Array.isArray(value.tree)
+  ) {
+    throw new RepoError(
+      "Could not read the repository's file tree.",
+      502,
+    );
+  }
+
+  return value as GitHubTree;
+}
+
+function decodeFile(
+  data: GitHubContent,
+  path: string,
+): SourceFile {
   if (
     data.type !== "file" ||
     data.encoding !== "base64" ||
     typeof data.content !== "string"
-  )
-    throw new RepoError("This item isn't a readable source file.");
-  if (data.size > MAX_FILE || data.content.length > MAX_FILE * 1.5)
+  ) {
+    throw new RepoError(
+      "This item isn't a readable source file.",
+      400,
+    );
+  }
+
+  if (
+    (typeof data.size === "number" &&
+      data.size > MAX_FILE) ||
+    data.content.length > MAX_FILE * 1.5
+  ) {
     throw new RepoError(
       "This file is larger than the 64 KB reading limit. Open it on GitHub instead.",
       413,
     );
-  const content = Buffer.from(data.content, "base64").toString("utf8");
-  if (content.includes("\0"))
+  }
+
+  const bytes = Buffer.from(
+    data.content.replace(/\s/g, ""),
+    "base64",
+  );
+
+  if (bytes.byteLength > MAX_FILE) {
+    throw new RepoError(
+      "This file is larger than the 64 KB reading limit. Open it on GitHub instead.",
+      413,
+    );
+  }
+
+  const content = bytes.toString("utf8");
+
+  if (content.includes("\0")) {
     throw new RepoError(
       "Binary files aren't displayed. Open this file on GitHub instead.",
+      415,
     );
-  return { path, content };
+  }
+
+  return {
+    path,
+    content,
+  };
+}
+
+function sourceFromCache(
+  cached: CachedSource,
+): SourceFile {
+  return {
+    path: cached.path,
+    content: cached.content,
+  };
+}
+
+async function fetchSourceFromGitHub(input: {
+  owner: string;
+  name: string;
+  commit: string;
+  path: string;
+}): Promise<SourceFile> {
+  const base = encodedRepositoryBase(
+    input.owner,
+    input.name,
+  );
+
+  const result = await githubJson<GitHubContent>(
+    `${base}/contents/${encodeGitHubPath(input.path)}`,
+    {
+      query: {
+        ref: input.commit,
+      },
+    },
+  );
+
+  return decodeFile(result, input.path);
+}
+
+async function readSnapshotSource(input: {
+  snapshot: RepositorySnapshot;
+  owner: string;
+  name: string;
+  commit: string;
+  path: string;
+  cache: PersistentCacheModule;
+}): Promise<SourceFile> {
+  const hit = await input.cache.findSource({
+    repositoryId: input.snapshot.repositoryId,
+    commitSha: input.commit,
+    path: input.path,
+  });
+
+  if (hit) {
+    return sourceFromCache(hit);
+  }
+
+  const source = await fetchSourceFromGitHub({
+    owner: input.owner,
+    name: input.name,
+    commit: input.commit,
+    path: input.path,
+  });
+
+  const saved = await input.cache.saveSource({
+    repositoryId: input.snapshot.repositoryId,
+    commitSha: input.commit,
+    path: input.path,
+    content: source.content,
+  });
+
+  return sourceFromCache(saved);
 }
 
 export async function readSource(
   repo: unknown,
-  commit: unknown,
-  path: unknown,
-) {
+  commitValue: unknown,
+  pathValue: unknown,
+): Promise<SourceFile> {
   const { owner, name } = parseRepo(repo);
-  if (typeof commit !== "string" || !/^[a-f0-9]{40}$/.test(commit))
-    throw new RepoError(
-      "Analyze the repository again to obtain a valid snapshot.",
-    );
+  const commit = validateCommit(commitValue);
+  const path = validateSourcePath(pathValue);
+
   if (
-    typeof path !== "string" ||
-    !path ||
     !isSafeSource(path) ||
     path.startsWith("/") ||
     path.includes("\\")
-  )
-    throw new RepoError("This file is excluded from analysis for safety.");
-  const result = await github(
-    `/repos/${owner}/${name}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${commit}`,
-  );
-  return decodeFile(result, path);
+  ) {
+    throw new RepoError(
+      "This file is excluded from analysis for safety.",
+      400,
+    );
+  }
+
+  const cache = await loadPersistentCache();
+
+  /*
+   * Tests and explicitly configured memory-mode environments still
+   * call GitHub directly, matching the old behavior.
+   */
+  if (!cache) {
+    return fetchSourceFromGitHub({
+      owner,
+      name,
+      commit,
+      path,
+    });
+  }
+
+  const snapshot =
+    await cache.findSnapshotByCoordinates({
+      owner,
+      name,
+      commitSha: commit,
+    });
+
+  if (!snapshot) {
+    throw new RepoError(
+      "Import this repository again before opening its source files.",
+      409,
+    );
+  }
+
+  return readSnapshotSource({
+    snapshot,
+    owner,
+    name,
+    commit,
+    path,
+    cache,
+  });
 }
 
-export async function analyzeRepository(input: unknown): Promise<Guide> {
-  const { owner, name } = parseRepo(input);
-  const key = `${owner}/${name}`.toLowerCase();
-  const hit = cache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.guide;
-  const base = `/repos/${owner}/${name}`;
-  const meta = await github(base);
-  if (meta.private || typeof meta.default_branch !== "string")
-    throw new RepoError(
-      "Only public repositories with a default branch can be analyzed.",
-    );
-  const commitInfo = await github(
-    `${base}/commits/${encodeURIComponent(meta.default_branch)}`,
-  );
-  if (
-    typeof commitInfo.sha !== "string" ||
-    !/^[a-f0-9]{40}$/.test(commitInfo.sha)
-  )
-    throw new RepoError("Could not resolve this repository's snapshot.", 502);
-  const commit = commitInfo.sha;
-  const tree = await github(`${base}/git/trees/${commit}?recursive=1`);
-  if (!Array.isArray(tree.tree))
-    throw new RepoError("Could not read the repository's file tree.", 502);
-  const allowed: RepoFile[] = tree.tree
+function selectRepositoryFiles(
+  tree: GitHubTree,
+): RepoFile[] {
+  const entries = tree.tree as GitHubTreeEntry[];
+
+  return entries
     .filter(
-      (f: any) =>
-        typeof f.path === "string" &&
-        f.type === "blob" &&
-        typeof f.sha === "string" &&
-        isSafeSource(f.path),
+      (entry) =>
+        typeof entry.path === "string" &&
+        entry.type === "blob" &&
+        typeof entry.sha === "string" &&
+        isSafeSource(entry.path),
     )
-    .map((f: any) => ({
-      path: f.path,
-      type: "blob",
-      size: f.size,
-      sha: f.sha,
+    .map((entry) => ({
+      path: entry.path as string,
+      type: "blob" as const,
+      size:
+        typeof entry.size === "number"
+          ? entry.size
+          : undefined,
+      sha: entry.sha as string,
     }));
+}
+
+function selectInitialSources(
+  files: RepoFile[],
+): {
+  selected: RepoFile[];
+  manifestCount: number;
+} {
+  const readmes = files
+    .filter((file) =>
+      /^readme(\.[^/]*)?$/i.test(file.path),
+    )
+    .sort((left, right) =>
+      left.path.localeCompare(right.path),
+    );
+
+  const manifestPattern =
+    /(^|\/)(package\.json|requirements[^/]*\.txt|pyproject\.toml|pipfile|setup\.py|cargo\.toml|go\.mod|pom\.xml|build\.gradle|dockerfile|docker-compose\.ya?ml|compose\.ya?ml)$/i;
+
+  const manifests = files
+    .filter((file) =>
+      manifestPattern.test(file.path),
+    )
+    .sort((left, right) => {
+      const depthDifference =
+        left.path.split("/").length -
+        right.path.split("/").length;
+
+      return (
+        depthDifference ||
+        left.path.localeCompare(right.path)
+      );
+    });
+
+  /*
+   * Import only one root README and at most eight manifests.
+   * Entry points and all other files are loaded when selected.
+   */
+  const candidates = [
+    ...readmes.slice(0, 1),
+    ...manifests.slice(0, MAX_MANIFESTS),
+  ];
+
+  const selected = [
+    ...new Map(
+      candidates.map((file) => [
+        file.path,
+        file,
+      ]),
+    ).values(),
+  ].filter(
+    (file) =>
+      (file.size ?? 0) <= MAX_FILE,
+  );
+
+  return {
+    selected,
+    manifestCount: manifests.length,
+  };
+}
+
+async function readInitialSources(input: {
+  selected: RepoFile[];
+  owner: string;
+  name: string;
+  commit: string;
+  snapshot: RepositorySnapshot | null;
+  cache: PersistentCacheModule | null;
+}): Promise<{
+  sources: SourceFile[];
+  failures: number;
+}> {
+  const sources: SourceFile[] = [];
+  let failures = 0;
+
+  /*
+   * Four concurrent requests is conservative enough for the MVP and
+   * avoids sending a large burst to GitHub.
+   */
+  for (
+    let index = 0;
+    index < input.selected.length;
+    index += 4
+  ) {
+    const batch = await Promise.all(
+      input.selected
+        .slice(index, index + 4)
+        .map(async (file) => {
+          try {
+            if (input.cache && input.snapshot) {
+              return await readSnapshotSource({
+                snapshot: input.snapshot,
+                owner: input.owner,
+                name: input.name,
+                commit: input.commit,
+                path: file.path,
+                cache: input.cache,
+              });
+            }
+
+            return await fetchSourceFromGitHub({
+              owner: input.owner,
+              name: input.name,
+              commit: input.commit,
+              path: file.path,
+            });
+          } catch {
+            failures++;
+            return null;
+          }
+        }),
+    );
+
+    sources.push(
+      ...batch.filter(
+        (source): source is SourceFile =>
+          source !== null,
+      ),
+    );
+  }
+
+  return {
+    sources,
+    failures,
+  };
+}
+
+async function assembleGuide(input: {
+  owner: string;
+  name: string;
+  commit: string;
+  defaultBranch: string;
+  metadata: GitHubRepository;
+  tree: GitHubTree;
+  snapshot: RepositorySnapshot | null;
+  cache: PersistentCacheModule | null;
+  analyzedAt: string;
+}) {
+  const allowed = selectRepositoryFiles(input.tree);
   const warnings: string[] = [];
-  if (tree.truncated || allowed.length > 2500)
+  if (input.tree.truncated === true || allowed.length > MAX_VISIBLE_FILES) {
     warnings.push(
       "Partial repository: GitHub's tree limit or Peritia's 2,500-file limit was reached. Counts describe only the visible snapshot.",
     );
-  const files = allowed.slice(0, 2500);
-  const manifests = files
-    .filter((f) =>
-      /(^|\/)(package\.json|requirements[^/]*\.txt|pyproject\.toml|Pipfile)$/.test(
-        f.path,
-      ),
-    )
-    .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
-  const readmes = files.filter((f) => /^readme(\.[^/]*)?$/i.test(f.path));
-  const entries = files
-    .filter((f) =>
-      /(^|\/)(main|index|App|app|server|page)\.(tsx?|jsx?|py)$/.test(f.path),
-    )
-    .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
-  const selected = [
-    ...new Map(
-      [...readmes, ...manifests.slice(0, 8), ...entries.slice(0, 7)].map(
-        (f) => [f.path, f],
-      ),
-    ).values(),
-  ]
-    .filter((f) => (f.size ?? 0) <= MAX_FILE)
-    .slice(0, 16);
-  if (manifests.length > 8)
+  }
+  const files = allowed.slice(0, MAX_VISIBLE_FILES);
+  const { selected, manifestCount } = selectInitialSources(files);
+  if (manifestCount > MAX_MANIFESTS) {
     warnings.push(
       "This repository contains more than eight manifests. Technology detection covers the first eight, prioritizing root-level files.",
     );
-  const sources: SourceFile[] = [];
-  let failed = 0;
-  for (let i = 0; i < selected.length; i += 4) {
-    const batch = await Promise.all(
-      selected.slice(i, i + 4).map(async (f) => {
-        try {
-          return await readSource(
-            `https://github.com/${owner}/${name}`,
-            commit,
-            f.path,
-          );
-        } catch {
-          failed++;
-          return null;
-        }
-      }),
-    );
-    sources.push(...batch.filter((s): s is SourceFile => !!s));
   }
-  if (failed)
+  const { sources, failures } = await readInitialSources({
+    selected,
+    owner: input.owner,
+    name: input.name,
+    commit: input.commit,
+    snapshot: input.snapshot,
+    cache: input.cache,
+  });
+  if (failures > 0) {
     warnings.push(
-      `${failed} selected file${failed === 1 ? "" : "s"} could not be read. Some dependency details may be missing; file names remain available.`,
+      `${failures} selected file${failures === 1 ? "" : "s"} could not be read. Some dependency details may be missing; file names remain available.`,
     );
-  const guide = buildGuide({
-    owner,
-    name,
-    description:
-      typeof meta.description === "string"
-        ? meta.description
-        : "The repository author hasn't provided a description. Read its README and entry points to establish the project's purpose.",
-    branch: meta.default_branch,
-    commit,
-    url: `https://github.com/${owner}/${name}`,
-    stars: meta.stargazers_count ?? 0,
+  }
+  return buildGuide({
+    owner: input.owner,
+    name: input.name,
+    description: typeof input.metadata.description === "string"
+      ? input.metadata.description
+      : "The repository author hasn't provided a description. Read its README and entry points to establish the project's purpose.",
+    branch: input.defaultBranch,
+    commit: input.commit,
+    url: `https://github.com/${input.owner}/${input.name}`,
+    stars: typeof input.metadata.stargazers_count === "number"
+      ? input.metadata.stargazers_count
+      : 0,
     files,
     sources,
     warnings,
+    analyzedAt: input.analyzedAt,
+  });
+}
+
+export async function restoreRepositoryGuide(snapshot: RepositorySnapshot): Promise<Guide> {
+  const cache = await loadPersistentCache();
+  if (!cache) throw new RepoError("Persistent repository storage is unavailable.", 503);
+  const metadata = typeof snapshot.metadata === "object" && snapshot.metadata !== null
+    ? snapshot.metadata as GitHubRepository
+    : {};
+  return assembleGuide({
+    owner: snapshot.owner,
+    name: snapshot.name,
+    commit: snapshot.commitSha,
+    defaultBranch: snapshot.defaultBranch,
+    metadata,
+    tree: requireTree(snapshot.tree),
+    snapshot,
+    cache,
+    analyzedAt: snapshot.createdAt.toISOString(),
+  });
+}
+
+export async function analyzeRepository(
+  input: unknown,
+): Promise<Guide> {
+  const { owner, name } = parseRepo(input);
+  const cacheKey = `${owner}/${name}`.toLowerCase();
+  const persistentCache =
+    await loadPersistentCache();
+
+  if (!persistentCache) {
+    const hit = memoryCache.get(cacheKey);
+
+    if (hit && hit.expires > Date.now()) {
+      console.info(
+        JSON.stringify({
+          event: "github_guide_memory_cache_hit",
+        }),
+      );
+
+      return hit.guide;
+    }
+  }
+
+  const base = encodedRepositoryBase(owner, name);
+
+  const metadata =
+    await githubJson<GitHubRepository>(base);
+
+  if (metadata.private === true) {
+    throw new RepoError(
+      "Only public repositories can be analyzed.",
+      400,
+    );
+  }
+
+  const defaultBranch = requireDefaultBranch(
+    metadata.default_branch,
+  );
+/*
+ * PostgreSQL cache keys require GitHub's stable repository ID.
+ * Isolated memory-mode tests can use owner/name when their
+ * mocked metadata predates this requirement.
+ */
+const repositoryId = persistentCache
+  ? requireRepositoryId(metadata.id)
+  : metadata.id !== undefined
+    ? String(metadata.id)
+    : cacheKey;
+  const commitInfo =
+    await githubJson<GitHubCommit>(
+      `${base}/commits/${encodeURIComponent(defaultBranch)}`,
+    );
+
+  const commit = validateCommit(commitInfo.sha);
+
+  let snapshot: RepositorySnapshot | null = null;
+  let tree: GitHubTree;
+
+  if (persistentCache) {
+    snapshot = await persistentCache.findSnapshot({
+      repositoryId,
+      commitSha: commit,
+    });
+  }
+
+  if (snapshot) {
+    tree = requireTree(snapshot.tree);
+  } else {
+    tree = requireTree(
+      await githubJson<GitHubTree>(
+        `${base}/git/trees/${commit}`,
+        {
+          query: {
+            recursive: 1,
+          },
+        },
+      ),
+    );
+
+    if (persistentCache) {
+      snapshot =
+        await persistentCache.saveSnapshot({
+          repositoryId,
+          owner,
+          name,
+          commitSha: commit,
+          defaultBranch,
+          tree,
+          metadata,
+          treeTruncated:
+            tree.truncated === true,
+        });
+    }
+  }
+
+  const guide = await assembleGuide({
+    owner,
+    name,
+    defaultBranch,
+    commit,
+    metadata,
+    tree,
+    snapshot,
+    cache: persistentCache,
     analyzedAt: new Date().toISOString(),
   });
-  if (cache.size >= 12) cache.delete(cache.keys().next().value!);
-  cache.set(key, { expires: Date.now() + 300000, guide });
+
+  if (!persistentCache) {
+    if (memoryCache.size >= 12) {
+      const oldest =
+        memoryCache.keys().next().value;
+
+      if (oldest) {
+        memoryCache.delete(oldest);
+      }
+    }
+
+    memoryCache.set(cacheKey, {
+      expires: Date.now() + 300_000,
+      guide,
+    });
+  }
+
   return guide;
 }

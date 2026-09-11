@@ -1,8 +1,19 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Sparkles, Loader2, ExternalLink } from "lucide-react";
 import { useAccount } from "./account";
-import { PAGE_LINES, type Explanation } from "../lib/explanation";
+import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
+import { ticketBreakdownLabel, useBilling } from "./billing";
+
+const MarkdownOutput = lazy(() => import("./markdown-output"));
+
+function StreamedMarkdown({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <Suspense fallback={<p className="ai-markdown-loading" role="status">Preparing the response view…</p>}>
+      <MarkdownOutput text={text} live={live} />
+    </Suspense>
+  );
+}
 
 export function AIExplanation({
   guide,
@@ -16,34 +27,18 @@ export function AIExplanation({
   level: string;
 }) {
   const account = useAccount();
-  const [page, setPage] = useState(0);
   const total = content.replace(/\r\n/g, "\n").split("\n").length;
   return (
     <section className="ai-panel" aria-label="AI file explanation">
       <span className="mini-label">
-        <Sparkles size={15} /> LOCAL AI · NO API FEES
+        <Sparkles size={15} /> AI SOURCE EXPLANATION
       </span>
       <h3>Understand the code</h3>
       <p className="metadata-note">
-        The selected section goes to the server owner's local Ollama model.
-        Source excerpts are checked; the explanation can still be mistaken.
+        The complete selected public file is explained in ordered chunks. Gemini's
+        Markdown streams directly; verify its conclusions against the source.
       </p>
-      {total > PAGE_LINES && (
-        <label className="ai-range">
-          Section to explain
-          <select
-            value={page}
-            onChange={(e) => setPage(Number(e.target.value))}
-          >
-            {Array.from({ length: Math.ceil(total / PAGE_LINES) }, (_, i) => (
-              <option key={i} value={i}>
-                Lines {i * PAGE_LINES + 1}–
-                {Math.min(total, (i + 1) * PAGE_LINES)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <p className="ai-file-scope">Entire file · {total.toLocaleString()} lines</p>
       {!account.ready ? (
         <p role="status">Checking your session…</p>
       ) : !account.user ? (
@@ -51,93 +46,165 @@ export function AIExplanation({
           Sign in for AI explanations
         </button>
       ) : (
-        <Generated
-          key={[
-            account.user.id,
-            guide.url,
-            guide.commit,
-            path,
-            page,
-            level,
-          ].join(":")}
-          guide={guide}
-          path={path}
-          page={page}
-          level={level}
-        />
+        <>
+          <UsageControl />
+          <Generated
+            key={[
+              account.user.id,
+              guide.url,
+              guide.commit,
+              path,
+              level,
+            ].join(":")}
+            guide={guide}
+            path={path}
+            level={level}
+          />
+        </>
       )}
     </section>
+  );
+}
+
+function UsageControl() {
+  const { usage, loading, error, openPaywall, manage } = useBilling();
+  return (
+    <div className="ai-range">
+      <span>{usage ? `${usage.plan} plan · ${usage.remaining} explanation tickets remaining` : "Loading allowance…"}</span>
+      {usage?.plan === "pro" && ticketBreakdownLabel(usage) && (
+        <span className="ticket-breakdown">{ticketBreakdownLabel(usage)}</span>
+      )}
+      {usage?.plan === "pro" && usage.remaining === 0 ? (
+        <button className="small-link" onClick={openPaywall}>Buy 50 more</button>
+      ) : usage?.plan === "pro" ? (
+        <button className="small-link" onClick={manage}>Manage subscription</button>
+      ) : usage ? (
+        <button className="small-link" onClick={openPaywall}>Go Pro</button>
+      ) : null}
+      {loading && <Loader2 size={13} className="spin" />}
+      {error && <span role="alert">{error}</span>}
+    </div>
   );
 }
 function Generated({
   guide,
   path,
-  page,
   level,
 }: {
   guide: Guide;
   path: string;
-  page: number;
   level: string;
 }) {
-  const { refresh } = useAccount();
+  const { refresh, user } = useAccount();
+  const billing = useBilling();
   const [data, setData] = useState<Explanation | null>(null);
   const [error, setError] = useState(""),
-    [busy, setBusy] = useState(true),
-    [attempt, setAttempt] = useState(0);
+    [busy, setBusy] = useState(false),
+    [jobId, setJobId] = useState<string | null>(null),
+    [progress, setProgress] = useState(""),
+    [quotaExhausted, setQuotaExhausted] = useState(false);
+  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:file:${level}`;
+
   useEffect(() => {
-    const controller = new AbortController();
+    const saved = sessionStorage.getItem(storageKey);
+    setJobId(saved);
+    setData(null);
+    setProgress("");
+    setError("");
+    setQuotaExhausted(false);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!jobId) return;
     let live = true;
     setBusy(true);
+    const events = new EventSource(`/api/explanations/${jobId}/events`);
+    const apply = (event: MessageEvent) => {
+      if (!live) return;
+      const snapshot = JSON.parse(event.data);
+      setProgress(snapshot.text || "");
+      if (snapshot.result) setData(snapshot.result);
+      if (snapshot.status === "completed") {
+        setBusy(false);
+        window.dispatchEvent(new Event("peritia:usage-changed"));
+        events.close();
+      } else if (snapshot.status === "failed") {
+        setBusy(false);
+        setError("The explanation failed and its reserved credit was restored.");
+        window.dispatchEvent(new Event("peritia:usage-changed"));
+        events.close();
+      }
+    };
+    events.addEventListener("snapshot", apply as EventListener);
+    events.addEventListener("complete", apply as EventListener);
+    events.addEventListener("failed", apply as EventListener);
+    events.onerror = () => {
+      if (live && events.readyState === EventSource.CLOSED) {
+        setBusy(false);
+        setError("The live connection closed. Reopen this file to reconnect.");
+      }
+    };
+    return () => { live = false; events.close(); };
+  }, [jobId]);
+
+  const generate = () => {
+    const controller = new AbortController();
+    setBusy(true);
     setError("");
+    setQuotaExhausted(false);
     setData(null);
-    const timeout = setTimeout(() => controller.abort(), 135000);
+    setProgress("");
     void (async () => {
       try {
-        const response = await fetch("/api/explain", {
+        const response = await fetch("/api/explanations", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
           body: JSON.stringify({
-            repo: guide.sample ? "sample" : guide.url,
+            repositoryId: guide.sample ? "sample" : guide.url,
             commit: guide.commit,
             path,
-            page,
+            scope: "file",
             level,
           }),
           signal: controller.signal,
         });
         const result = await response.json();
-        if (!live) return;
         if (response.status === 401) void refresh();
+        if (result.code === "QUOTA_EXHAUSTED") {
+          setQuotaExhausted(true);
+          billing.openPaywall();
+        }
         if (!response.ok)
           throw new Error(result.error || "Explanation failed.");
-        setData(result);
+        sessionStorage.setItem(storageKey, result.jobId);
+        setJobId(result.jobId);
+        if (result.result) setData(result.result);
       } catch (e) {
-        if (live)
-          setError(
-            e instanceof Error && e.name !== "AbortError"
-              ? e.message
-              : "The local model took too long. Try again after it finishes loading.",
-          );
-      } finally {
-        clearTimeout(timeout);
-        if (live) setBusy(false);
+        setBusy(false);
+        setError(e instanceof Error ? e.message : "Explanation failed.");
       }
     })();
-    return () => {
-      live = false;
-      controller.abort();
-      clearTimeout(timeout);
-    };
-  }, [guide.url, guide.commit, guide.sample, path, page, level, attempt]);
+  };
   return (
     <div aria-live="polite">
+      {!jobId && !busy && (
+        <button className="primary-button" onClick={generate}>
+          Explain the entire file
+        </button>
+      )}
       {busy && (
         <p className="ai-loading" role="status">
           <Loader2 size={18} className="spin" />
-          Reading this section with the local model… The first run may take up
-          to two minutes.
+          {progress
+            ? "LLM is responding… progress is saved if you leave this tab."
+            : "Queued for the AI model… You can keep browsing."}
         </p>
+      )}
+      {busy && progress && (
+        <StreamedMarkdown text={progress} live />
       )}
       {error && (
         <div className="ai-error">
@@ -145,34 +212,30 @@ function Generated({
           <p>File facts and source code below are still available.</p>
           <button
             className="secondary-button"
-            onClick={() => setAttempt((a) => a + 1)}
+            onClick={() => {
+              if (quotaExhausted) billing.openPaywall();
+              else {
+                sessionStorage.removeItem(storageKey);
+                setJobId(null);
+                generate();
+              }
+            }}
           >
-            Retry explanation
+            {quotaExhausted ? "View ticket options" : "Retry explanation"}
           </button>
         </div>
       )}
       {data && (
         <>
           <p className="metadata-note">
-            {data.model} · Lines {data.startLine}–{data.endLine} of{" "}
+            Lines {data.startLine}–{data.endLine} of{" "}
             {data.totalLines} ·{" "}
             {data.cached ? "Cached result" : "Generated now"}
           </p>
-          {data.unverified && data.rawText && (
-            <div className="ai-raw-response">
-              <strong>Unverified local AI response</strong>
-
-              <p>
-                The model answered, but its citation metadata did not pass
-                validation. Check this explanation against the Source code tab.
-              </p>
-
-              <pre>
-                <code>{data.rawText}</code>
-              </pre>
-            </div>
+          {data.rawText && (
+            <StreamedMarkdown text={data.rawText} />
           )}
-          {!data.unverified &&
+          {!data.rawText && !data.unverified &&
             data.claims.map((claim, i) => (
               <article className="ai-claim" key={i}>
                 <span className={`claim-kind ${claim.kind}`}>
@@ -206,7 +269,7 @@ function Generated({
               </article>
             ))}
           <div className="ai-limits">
-            <strong>What this section cannot establish</strong>
+            <strong>What this file cannot establish</strong>
             <ul>
               <li>
                 Other files and runtime behavior were not inspected by the
@@ -217,12 +280,6 @@ function Generated({
               ))}
             </ul>
           </div>
-          {data.totalLines > PAGE_LINES && (
-            <p className="metadata-note">
-              Only this section was explained. Select another section above to
-              continue.
-            </p>
-          )}
         </>
       )}
     </div>

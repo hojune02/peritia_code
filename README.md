@@ -1,6 +1,8 @@
-# Peritia 0.2 — accounts and local AI
+# Peritia — durable AI source explanations
 
-A React/TypeScript + Express web service that turns a public GitHub repository into an interactive guide. This edition adds email/password accounts, Google sign-in, revocable JWT sessions, and file explanations from a locally running Ollama model.
+A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Imported repositories, reviewed files, explanation jobs, quotas, cache access, provider usage, and billing state are durable in PostgreSQL; Redis/BullMQ connects the public API to a separate AI worker. Production uses Gemini 3.5 Flash-Lite; Ollama remains available for local development.
+
+The zero-cost Oracle beta setup, usage reporting, load testing, and release checks are documented in [OPERATIONS.md](./OPERATIONS.md).
 
 ## Start here
 
@@ -9,16 +11,20 @@ Install Node.js **24 LTS** (Node 22.13+ is also supported). From this folder:
 ```bash
 npm ci
 npm run setup
+docker compose -f compose.dev.yaml up -d
+npm run db:migrate
 npm run dev
 ```
+
+In another terminal, run `npm run start:worker` after Redis and Ollama are available. Set the local `DATABASE_URL` and `REDIS_URL` values from `.env.example` first.
 
 Open **http://localhost:5173**. Keep the terminal running. Vite serves the interface on 5173 and proxies API requests to Express on 3001. The setup command creates a local environment file with a random JWT secret; it never overwrites an existing one. If upgrading an existing installation, compare your settings with `.env.example` and add the new variables.
 
 Click **Sign in → Create an account**. Use an email address and a password of at least 12 characters. Google and AI configuration are independent: password login works before either is configured.
 
-## Free AI setup
+## Optional local Ollama setup
 
-There is **no paid AI API, API key, subscription, or cloud fallback** in this application. The model runs on your own hardware. Electricity, hardware, bandwidth, domain names, and hosted servers can still cost money; this is not unlimited free cloud inference.
+Local development defaults to Ollama, so development does not require sending source to an API. Production Compose explicitly uses Gemini instead.
 
 1. Install Ollama from https://ollama.com/download.
 2. Disable its cloud features. In Ollama's `~/.ollama/server.json`, merge `"disable_ollama_cloud": true` into the JSON object, then restart Ollama. Alternatively, set `OLLAMA_NO_CLOUD=1` in the environment of the **Ollama server process**, not just Peritia.
@@ -29,18 +35,20 @@ ollama pull qwen2.5-coder:7b
 ```
 
 4. Keep Ollama running. If the desktop app/service is not already running, use `ollama serve` in another terminal. Verify it with `ollama list`.
-5. Sign in to Peritia, open **File explorer**, and select a readable file. Its **Understand** panel generates the explanation automatically. Expand **Inspect evidence** to compare each claim with exact source lines. The bundled example also works with AI.
+5. Sign in to Peritia, open **File explorer**, select a readable file, and explicitly request an explanation. You can browse or close the tab while the worker continues; reopening reconnects to the durable job. Gemini's text appears as it is generated and the final response remains available with the job.
 
-The default model download is about 4.7 GB; it also needs memory for the model and a 16K context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is a separate step and is not bundled into this ZIP. GPU setup depends on your hardware; the Docker example below uses CPU by default.
+The default local model download is about 4.7 GB; it also needs memory for the model and its context. Available RAM and CPU/GPU speed determine whether it runs comfortably. CPU-only runs may time out; the app reports this instead of inventing a result. Model installation is separate and is not bundled with the application.
 
 ### How accuracy is handled
 
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
-- The model receives a numbered **80-line section**, not an assertion that it has read the whole repository. Select the next section for longer files. Dense/minified sections that exceed the input budget are refused without silent truncation.
-- Structured output includes claims, observation/inference labels, source line ranges, exact excerpts, and limitations. Every quoted excerpt and range is checked against the selected source before rendering. Invalid output is rejected as a whole.
+- Signed-in users get an isolated repository library. Per-user rows link to shared immutable GitHub snapshots instead of duplicating trees or source content; only the lightweight list loads initially, and a guide/source loads when opened.
+- Opening a source file uses a desktop split view: exact commit-pinned source with language-aware syntax highlighting on the left and the explanation notebook on the right. Narrow screens retain tabs, and the syntax engine is loaded only when the viewer opens.
+- One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
+- Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
-- **A valid citation does not prove the explanation is true.** A model can misinterpret correctly quoted code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
-- Responses are cached for 30 minutes in bounded server memory, keyed by repository, commit, file, source hash, section, detail level, and model. The cache is shared for public source only. There is one active generation per server and a 30-request/hour limit per account. Cache hits also count toward this limit.
+- **A line reference does not prove the explanation is true.** A model can misinterpret code or follow a malicious comment despite the prompt. Inspect its claims; no accuracy percentage or guarantee is claimed.
+- Completed output is cached durably by immutable source, whole-file range, detail level, prompt version, generation options, and model digest. Each new unlock reserves one atomic quota credit, including a shared cache hit; previously unlocked output remains accessible without another credit.
 
 The curated technology glossary and static file facts remain available when AI is unavailable. See **TESTING.md** for a real-model C/Python/React evaluation and a human accuracy rubric.
 
@@ -72,7 +80,7 @@ The backend uses authorization code exchange with PKCE, browser-bound expiring s
 
 ## JWT and account storage
 
-Passwords use salted scrypt hashes. Users, sessions, and short-lived OAuth transactions live in SQLite at `DATABASE_PATH`, defaulting to `data/peritia.sqlite`. Accounts survive app restarts if that directory persists.
+Passwords use salted scrypt hashes. Users, sessions, OAuth transactions, explanation jobs, quotas, and billing state live in PostgreSQL. Redis carries durable job IDs to the worker but is not the billing source of truth.
 
 JWTs expire after eight hours and travel in an HttpOnly, SameSite=Lax cookie; production also uses Secure and the `__Host-` prefix. No tokens are put in localStorage or exposed in JSON responses. Each authenticated request checks a server-side session record, so logout revokes that token immediately. After expiry, sign in again; there is no refresh-token flow.
 
@@ -86,15 +94,28 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | APP_ORIGIN                              | Exact browser origin. `http://localhost:5173` for development; HTTPS origin for production. No trailing slash.                  |
 | JWT_SECRET                              | Random secret of at least 32 bytes. `npm run setup` generates one. Keep stable across restarts; changing it signs everyone out. |
-| DATABASE_PATH                           | Persistent SQLite location. Back up the database.                                                                               |
+| DATABASE_URL                            | PostgreSQL connection used by the API, worker, migrations, and durable caches.                                                  |
+| REDIS_URL                               | Redis connection used by the explanation outbox dispatcher and worker.                                                         |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
+| AI_PROVIDER                             | `ollama` for local development or `gemini` for the production worker.                                                                  |
+| GEMINI_API_KEY                          | Server-only Gemini credential. Required when `AI_PROVIDER=gemini`.                                                                     |
+| GEMINI_MODEL                            | Production model; defaults to `gemini-3.5-flash-lite`.                                                                                  |
+| GEMINI_BILLING_TIER                     | `free` records zero billed cost; `paid` records estimated list-price cost as billed cost.                                               |
+| AI_MODEL_REVISION                       | Deployment-controlled cache revision. Change it when model or provider behavior changes.                                                |
+| BILLING_ENABLED                         | Defaults to `false`. Set to `true` only after both Lemon Squeezy products and the signed webhook are verified in test mode.              |
+| LEMONSQUEEZY_API_KEY                    | Server-only Lemon Squeezy API key used to create hosted checkouts, cancel subscriptions, and fetch the customer portal.                  |
+| LEMONSQUEEZY_STORE_ID                   | Numeric ID of the approved Lemon Squeezy store.                                                                                          |
+| LEMONSQUEEZY_PRO_VARIANT_ID             | Numeric variant ID for the $9/month Pro subscription.                                                                                    |
+| LEMONSQUEEZY_TOPUP_VARIANT_ID           | Numeric variant ID for the $6 one-time 50-ticket refill.                                                                                 |
+| LEMONSQUEEZY_WEBHOOK_SECRET             | Secret used to verify the `X-Signature` of every billing webhook.                                                                        |
+| PAID_MONTHLY_ALLOWANCE / TOPUP_ALLOWANCE| Defaults to 100 monthly tickets and 50 non-expiring refill tickets. Keep these aligned with the checkout copy.                           |
 | OLLAMA_URL                              | Defaults to `http://127.0.0.1:11434`. Local hosts or private Docker hostname `ollama` only.                                     |
 | OLLAMA_MODEL                            | Defaults to `qwen2.5-coder:7b`; must be installed locally. Cloud model names are rejected.                                      |
 | PORT                                    | Express port, default 3001. Development script uses 3001 to match the Vite proxy.                                               |
 | NODE_ENV                                | `production` requires HTTPS. Leave unset for local compiled-app testing.                                                        |
 | DOMAIN                                  | Used by the production Docker Compose setup, e.g. `peritia.example.com`.                                                        |
 
-Never prefix secrets with `VITE_`, commit environment files, or put credentials in frontend code. GitHub requests remain unauthenticated; adding a `GITHUB_TOKEN` alone has no effect.
+Never prefix secrets with `VITE_`, commit environment files, or put credentials in frontend code. A GitHub token or GitHub App credential is optional for raising server-side API limits; private repository metadata is still rejected.
 
 ## Build and run the compiled app locally
 
@@ -108,29 +129,32 @@ npm start
 
 Open http://localhost:3001. For Google testing here, also authorize `http://localhost:3001/api/auth/google/callback`. Switch `APP_ORIGIN` back to port 5173 before resuming Vite development. `npm start` loads the local environment file but does not build automatically.
 
-## Deploy with persistent accounts and local inference
+## Deploy the zero-cost API beta
 
-Use a single Linux machine with Docker Engine + Compose, enough RAM for your model, persistent storage, and a domain whose DNS points to it. This can be your own machine or a server you rent. The previous stateless/free Render template was removed because it did not preserve SQLite accounts or provide local model inference.
+The supplied Compose topology runs separate API and worker processes with PostgreSQL/Redis, Caddy HTTPS, and Gemini. It has no Ollama container and requests no GPU, so it is suitable for an Oracle Always Free ARM VM.
 
 1. Upload this `peritia/` folder to your machine. Keep secrets outside Git and use a restrictive file permission for the environment file.
 2. Run the local setup once, or copy `.env.example` to `.env` and generate a random JWT secret using the command documented there.
-3. Set `DOMAIN=peritia.your-domain.com` in `.env`. Set your Google credentials if wanted. Compose derives `APP_ORIGIN=https://DOMAIN` and uses `/data/peritia.sqlite` in a named volume.
-4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001 or 11434 to the public internet.
-5. Start Ollama and download the model:
+3. Set `DOMAIN`, `POSTGRES_PASSWORD`, `GEMINI_API_KEY`, and `AI_MODEL_REVISION` in `.env`. Keep `GEMINI_BILLING_TIER=free` and `BILLING_ENABLED=false` until the Lemon Squeezy test-mode checklist in `OPERATIONS.md` passes. Compose derives `APP_ORIGIN=https://DOMAIN` and runs migrations once before API/worker startup.
+4. Point the domain's DNS to the machine. Allow inbound TCP ports **80 and 443** for Caddy HTTPS. Do not expose 3001, 5432, or 6379.
+5. Start the stack:
 
 ```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull qwen2.5-coder:7b
 docker compose up -d --build
-docker compose logs --tail=60 app proxy
+docker compose logs --tail=60 api worker proxy
 ```
 
 6. Visit `https://YOUR_DOMAIN/api/health`, then the main page. Caddy handles HTTPS. Add the production Google callback URL described above.
-7. Test sign-in and AI using **TESTING.md**. Model inference stays on the private Compose network; Ollama cloud features are disabled. No inference port is published.
+7. Test sign-in and AI using **TESTING.md**. Every account receives one three-use trial, including password-only accounts. Pro is $9/month for 100 tickets; active Pro accounts at zero can buy 50 non-expiring tickets for $6. The UI shows monthly, refill, trial, and bonus balances separately. With billing disabled, checkout, webhook, cancellation, and portal routes are not mounted.
+8. Review real provider usage and estimated cost:
 
-The Compose images use updateable Node 24, Caddy 2, and Ollama tags. Pin image digests after validating your deployment if you need exact image reproducibility; npm packages already have a lockfile. Docker execution and live HTTPS deployment were not tested in the authoring environment.
+```bash
+docker compose exec api npm run ai:costs
+```
 
-Keep the `accounts` named volume: **do not run `docker compose down -v`** unless you intend to delete accounts and model data. For a consistent backup, stop the app and back up the entire accounts volume, including any SQLite WAL files; restart afterward. Keep backups private. Do not run several replicas against this SQLite file. Growing beyond a single machine requires a shared database and distributed throttling.
+The report records each generation attempt, including failures, latency, provider model version, input/output/thought tokens, list-price estimate, and billed estimate. Update the configured token prices if Google changes its rates.
+
+Keep the `postgres` and `redis` named volumes: **do not run `docker compose down -v`** unless you intend to delete application data. Use PostgreSQL-native backups and test restoration before launch.
 
 ## Files to explore
 
@@ -138,9 +162,9 @@ Keep the `accounts` named volume: **do not run `docker compose down -v`** unless
 | ---------------------------------------- | ------------------------------------------------------------------------- |
 | app/page.tsx, app/globals.css            | Original interactive repository guide                                     |
 | components/account.tsx, app/features.css | Login dialog and account UI                                               |
-| components/ai-explanation.tsx            | Section selection, generation state, citations, stale-response protection |
+| components/ai-explanation.tsx            | Section selection, live generation output, and stale-response protection  |
 | server/auth.ts, server/store.ts          | Passwords, JWTs, Google OAuth, persistence                                |
-| server/ai.ts                             | Local model request, prompt, context limits, evidence checks, cache       |
+| server/ai.ts, server/gemini.ts           | Local-model validation, Gemini streaming, token and cost accounting       |
 | server/config.ts, server/app.ts          | Configuration validation and API routes                                   |
 | server/github.ts, lib/repository.ts      | Public GitHub ingestion and static analysis                               |
 | tests/features.test.ts                   | HTTP/auth and AI contract tests                                           |
@@ -149,9 +173,9 @@ Keep the `accounts` named volume: **do not run `docker compose down -v`** unless
 
 ## Verified and remaining checks
 
-In this workspace, dependency installation, all **29 automated tests**, TypeScript checking, and the client/server production build passed on Node 24.19.0. A compiled-server smoke test also passed for frontend delivery, account creation, sessions, logout, and offline-AI behavior. Auth tests use real HTTP endpoints, SQLite, password hashing, and JWTs. Google exchange/identity and AI responses are mocked in automated tests.
+The core suite covers real HTTP authentication plus mocked provider/model boundaries. `npm run test:integration` adds real PostgreSQL concurrency and settlement checks. Live Google, Gemini, and public deployment checks require external credentials and must pass the staging runbook before launch.
 
-No live Google account login, real Ollama generation, browser interaction, Docker build, or public deployment has been verified here. Those require your Google OAuth credentials, installed model/hardware, and deployment environment. Run the documented manual checks before inviting users.
+No live Google account login, real Gemini generation, browser interaction, or public deployment has been verified here. Those require your credentials and deployment environment. Run the documented manual checks before inviting users.
 
 ## Other MVP limits
 
@@ -159,6 +183,8 @@ Public repos only; up to 2,500 visible files, 16 initial source reads, and 64 KB
 
 ## Official references
 
+- Gemini streaming and usage metadata: https://ai.google.dev/gemini-api/docs/generate-content/text-generation and https://ai.google.dev/api/generate-content
+- Gemini pricing: https://ai.google.dev/gemini-api/docs/pricing
 - Google OAuth setup and token validation: https://developers.google.com/identity/openid-connect/openid-connect
 - Ollama API and structured outputs: https://docs.ollama.com/api/chat and https://docs.ollama.com/capabilities/structured-outputs
 - Ollama local-only mode: https://docs.ollama.com/faq
