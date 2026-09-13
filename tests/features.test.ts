@@ -18,10 +18,11 @@ import {
 import { createExplainer, validateExplanation } from "../server/ai";
 import type { Explanation } from "../lib/explanation";
 import { demoGuide } from "../lib/demo";
-import { chunkExplanationFile, makeCacheKey } from "../server/explanations";
+import { chunkExplanationFile, makeCacheKey, normalizeExplanationTask } from "../server/explanations";
 import { verifyWebhook, type BillingService } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
+import { buildControlFlowMap } from "../lib/control-flow";
 
 const config = getConfig({
   APP_ORIGIN: "http://localhost:5173",
@@ -82,6 +83,53 @@ test("whole-file explanation chunks cover every line without gaps", () => {
     () => chunkExplanationFile(["x".repeat(12_001)]),
     /line that is too large/,
   );
+});
+
+test("debugging requests require bounded observed symptoms", () => {
+  assert.deepEqual(normalizeExplanationTask({}), { intent: "explain" });
+  assert.deepEqual(
+    normalizeExplanationTask({ intent: "debug", question: "  HTTP 500 after saving a profile  " }),
+    { intent: "debug", question: "HTTP 500 after saving a profile" },
+  );
+  assert.throws(() => normalizeExplanationTask({ intent: "debug", question: "fails" }), /at least 10/);
+  assert.throws(() => normalizeExplanationTask({ intent: "debug", question: "x".repeat(2_001) }), /under 2,000/);
+  assert.throws(() => normalizeExplanationTask({ intent: "fix" }), /explanation or debugging/);
+});
+
+test("workflow map links observed call references to unique definitions", () => {
+  const map = buildControlFlowMap({
+    files: [
+      { path: "src/main.ts", type: "blob", sha: "1" },
+      { path: "src/data.ts", type: "blob", sha: "2" },
+      { path: "src/view.ts", type: "blob", sha: "3" },
+      { path: "src/not-loaded.ts", type: "blob", sha: "4" },
+    ],
+    sources: [
+      {
+        path: "src/main.ts",
+        content: "export async function start() {\n  const user = await loadUser();\n  return render(user);\n}",
+      },
+      {
+        path: "src/data.ts",
+        content: "export function loadUser() {\n  return databaseQuery();\n}",
+      },
+      {
+        path: "src/view.ts",
+        content: "export const render = (user: User) => format(user);",
+      },
+    ],
+  });
+
+  const start = map.nodes.find((node) => node.name === "start");
+  const load = map.nodes.find((node) => node.name === "loadUser");
+  const render = map.nodes.find((node) => node.name === "render");
+  assert(start && load && render);
+  assert(map.edges.some((edge) => edge.from === start.id && edge.to === load.id && edge.callLine === 2));
+  assert(map.edges.some((edge) => edge.from === start.id && edge.to === render.id && edge.callLine === 3));
+  assert.equal(map.inspectedFiles, 3);
+  assert.equal(map.visibleSourceFiles, 4);
+  assert(map.unresolvedCalls >= 2, "external call-like references stay explicitly unresolved");
+  assert.equal(map.flows[0].rootId, start.id);
 });
 
 test("billing webhook verification rejects malformed and altered signatures", () => {

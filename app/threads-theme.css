@@ -163,9 +163,363 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* Workflow navigator */
+.flow-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.flow-list,
+.flow-canvas,
+.flow-empty {
+  padding: 24px;
+}
+
+.flow-list {
+  position: sticky;
+  top: 96px;
+}
+
+.flow-list h2,
+.flow-canvas h2,
+.flow-empty h2 {
+  margin: 7px 0 6px;
+  font-size: 22px;
+  letter-spacing: -0.035em;
+}
+
+.flow-list > p,
+.flow-empty > p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.flow-picker {
+  display: grid;
+  gap: 4px;
+  max-height: min(58vh, 560px);
+  margin: 20px -8px -8px;
+  padding: 0 4px 8px;
+  overflow-y: auto;
+}
+
+.flow-picker > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 11px;
+}
+
+.flow-picker > button:hover,
+.flow-picker > button[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  border-color: var(--hairline);
+}
+
+.flow-picker button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.flow-picker strong,
+.flow-picker small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-picker small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.flow-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.flow-disclaimer svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.flow-disclaimer p {
+  margin: 0;
+}
+
+.flow-graph {
+  width: min(100%, 720px);
+  margin: 24px auto;
+}
+
+.flow-connector {
+  display: grid;
+  justify-items: center;
+  min-height: 54px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.flow-connector > span {
+  width: 1px;
+  height: 30px;
+  background: var(--hairline);
+}
+
+.flow-connector > small {
+  margin-top: 3px;
+  padding: 1px 7px;
+  background: var(--surface);
+}
+
+.flow-node {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 15px;
+  color: var(--text-primary);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+
+.flow-node:hover {
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.flow-node[data-root="true"] {
+  border-color: var(--text-secondary);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
+.flow-node-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  background: var(--surface-muted);
+  border-radius: 50%;
+}
+
+.flow-node-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.flow-node-copy strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+
+.flow-node-copy small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node-uses {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.flow-edges {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+}
+
+.flow-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.flow-endpoint {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  color: var(--text-primary);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 11px;
+}
+
+.flow-endpoint:hover {
+  background: var(--surface-hover);
+}
+
+.flow-endpoint > span {
+  display: grid;
+  min-width: 0;
+}
+
+.flow-endpoint strong,
+.flow-endpoint small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-endpoint strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.flow-endpoint small,
+.flow-edge-label,
+.flow-no-edges {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.flow-edge-label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.flow-edge-label::before {
+  content: "";
+  grid-column: 1 / -1;
+  grid-row: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.flow-edge-label > small,
+.flow-edge-label > svg {
+  z-index: 1;
+  grid-row: 1;
+  background: var(--surface-raised);
+}
+
+.flow-edge-label > small {
+  padding-right: 4px;
+}
+
+.flow-no-edges {
+  margin: 16px 0 0;
+  text-align: center;
+}
+
+.flow-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 15px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.flow-foot > span {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* Explain/debug task switch */
+.ai-intent-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+}
+
+.ai-intent-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-intent-tabs button:hover,
+.ai-intent-tabs button[aria-selected="true"] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.debug-context {
+  display: grid;
+  gap: 7px;
+  margin: 16px 0 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.debug-context textarea {
+  width: 100%;
+  min-height: 118px;
+  padding: 12px;
+  resize: vertical;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.debug-context textarea::placeholder,
+.debug-context small {
+  color: var(--text-tertiary);
+}
+
+.debug-context small {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.debug-again {
+  margin-top: 14px;
+  padding: 9px 12px;
 }
 
 /* App frame and navigation */
@@ -867,6 +1221,56 @@ h1 {
 }
 
 @media (max-width: 767px) {
+  .flow-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-list {
+    position: static;
+  }
+
+  .flow-picker {
+    max-height: 260px;
+  }
+
+  .flow-node {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .flow-node-uses {
+    display: none;
+  }
+
+  .flow-edge {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .flow-edge-label {
+    grid-template-columns: auto auto;
+    width: auto;
+    margin: 0 auto;
+  }
+
+  .flow-edge-label::before {
+    display: none;
+  }
+
+  .flow-edge-label > svg {
+    transform: rotate(90deg);
+  }
+
+  .flow-foot {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .flow-foot > span {
+    width: 100%;
+    margin-left: 23px;
+    text-align: left;
+  }
+
   .theme-toggle span {
     display: none;
   }

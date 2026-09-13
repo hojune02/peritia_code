@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Sparkles, Loader2, ExternalLink } from "lucide-react";
+import { Sparkles, Loader2, ExternalLink, Bug, BookOpen } from "lucide-react";
 import { useAccount } from "./account";
 import { type Explanation } from "../lib/explanation";
 import { sourceUrl, type Guide } from "../lib/repository";
@@ -27,17 +27,28 @@ export function AIExplanation({
   level: string;
 }) {
   const account = useAccount();
+  const [intent, setIntent] = useState<"explain" | "debug">("explain");
   const total = content.replace(/\r\n/g, "\n").split("\n").length;
   return (
     <section className="ai-panel" aria-label="AI file explanation">
       <span className="mini-label">
-        <Sparkles size={15} /> AI SOURCE EXPLANATION
+        {intent === "debug" ? <Bug size={15} /> : <Sparkles size={15} />}
+        {intent === "debug" ? "AI DEBUGGING PARTNER" : "AI SOURCE EXPLANATION"}
       </span>
-      <h3>Understand the code</h3>
+      <h3>{intent === "debug" ? "Investigate a failure" : "Understand the code"}</h3>
       <p className="metadata-note">
-        The complete selected public file is explained in ordered chunks. LLM's
-        Markdown streams directly; verify its conclusions against the source.
+        {intent === "debug"
+          ? "Describe the observed symptom. The complete file is inspected, hypotheses stream directly, and uncertainty stays explicit."
+          : "The complete selected public file is explained in ordered chunks. LLM's Markdown streams directly; verify its conclusions against the source."}
       </p>
+      <div className="ai-intent-tabs" role="tablist" aria-label="AI task">
+        <button role="tab" aria-selected={intent === "explain"} onClick={() => setIntent("explain")}>
+          <BookOpen size={15} /> Explain
+        </button>
+        <button role="tab" aria-selected={intent === "debug"} onClick={() => setIntent("debug")}>
+          <Bug size={15} /> Debug
+        </button>
+      </div>
       <p className="ai-file-scope">Entire file · {total.toLocaleString()} lines</p>
       {!account.ready ? (
         <p role="status">Checking your session…</p>
@@ -49,16 +60,11 @@ export function AIExplanation({
         <>
           <UsageControl />
           <Generated
-            key={[
-              account.user.id,
-              guide.url,
-              guide.commit,
-              path,
-              level,
-            ].join(":")}
+            key={`${account.user.id}:${guide.commit}:${path}:${level}:${intent}`}
             guide={guide}
             path={path}
             level={level}
+            intent={intent}
           />
         </>
       )}
@@ -90,10 +96,12 @@ function Generated({
   guide,
   path,
   level,
+  intent,
 }: {
   guide: Guide;
   path: string;
   level: string;
+  intent: "explain" | "debug";
 }) {
   const { refresh, user } = useAccount();
   const billing = useBilling();
@@ -102,8 +110,9 @@ function Generated({
     [busy, setBusy] = useState(false),
     [jobId, setJobId] = useState<string | null>(null),
     [progress, setProgress] = useState(""),
+    [question, setQuestion] = useState(""),
     [quotaExhausted, setQuotaExhausted] = useState(false);
-  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:file:${level}`;
+  const storageKey = `peritia:explanation:${user?.id}:${guide.commit}:${path}:file:${level}:${intent}`;
 
   useEffect(() => {
     const saved = sessionStorage.getItem(storageKey);
@@ -168,6 +177,8 @@ function Generated({
             path,
             scope: "file",
             level,
+            intent,
+            ...(intent === "debug" ? { question: question.trim() } : {}),
           }),
           signal: controller.signal,
         });
@@ -190,17 +201,34 @@ function Generated({
   };
   return (
     <div aria-live="polite">
+      {!jobId && !busy && intent === "debug" && (
+        <label className="debug-context">
+          <span>What did you observe?</span>
+          <textarea
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            maxLength={2000}
+            rows={5}
+            placeholder="Paste the error or describe expected vs. actual behavior, reproduction steps, and relevant inputs…"
+          />
+          <small>{question.length.toLocaleString()} / 2,000 · Include runtime evidence when you have it.</small>
+        </label>
+      )}
       {!jobId && !busy && (
-        <button className="primary-button" onClick={generate}>
-          Explain the entire file
+        <button
+          className="primary-button"
+          onClick={generate}
+          disabled={intent === "debug" && question.trim().length < 10}
+        >
+          {intent === "debug" ? "Investigate this file" : "Explain the entire file"}
         </button>
       )}
       {busy && (
         <p className="ai-loading" role="status">
           <Loader2 size={18} className="spin" />
           {progress
-            ? "LLM is responding… progress is saved if you leave this tab."
-            : "Queued for the AI model… You can keep browsing."}
+            ? `LLM is ${intent === "debug" ? "investigating" : "responding"}… progress is saved if you leave this tab.`
+            : `Queued for ${intent === "debug" ? "debugging analysis" : "the AI model"}… You can keep browsing.`}
         </p>
       )}
       {busy && progress && (
@@ -280,6 +308,20 @@ function Generated({
               ))}
             </ul>
           </div>
+          {intent === "debug" && (
+            <button
+              className="secondary-button debug-again"
+              onClick={() => {
+                sessionStorage.removeItem(storageKey);
+                setJobId(null);
+                setData(null);
+                setProgress("");
+                setQuestion("");
+              }}
+            >
+              Investigate another symptom
+            </button>
+          )}
         </>
       )}
     </div>

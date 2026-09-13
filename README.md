@@ -2,6 +2,8 @@
 
 A React/TypeScript + Express service that turns a public GitHub repository into an interactive guide. Imported repositories, reviewed files, explanation jobs, quotas, cache access, provider usage, and billing state are durable in PostgreSQL; Redis/BullMQ connects the public API to a separate AI worker. Production uses Gemini 3.5 Flash-Lite; Ollama remains available for local development.
 
+Peritia supports two complementary expert workflows: an evidence-labelled static workflow map for following one definition/call path at a time, and symptom-driven debugging that streams hypotheses, source evidence, and suggested probes beside the exact commit-pinned file.
+
 The zero-cost Oracle beta setup, usage reporting, load testing, and release checks are documented in [OPERATIONS.md](./OPERATIONS.md).
 
 ## Start here
@@ -44,6 +46,8 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
 - Signed-in users get an isolated repository library. Per-user rows link to shared immutable GitHub snapshots instead of duplicating trees or source content; only the lightweight list loads initially, and a guide/source loads when opened.
 - Opening a source file uses a desktop split view: exact commit-pinned source with language-aware syntax highlighting on the left and the explanation notebook on the right. Narrow screens retain tabs, and the syntax engine is loaded only when the viewer opens.
+- **Workflows** links call-like references to unique function definitions found in the inspected sources. Nodes open the existing source notebook, and opening another code file grows the in-session map lazily rather than downloading the whole repository. This is deliberately labelled as partial static evidence, not runtime control flow; aliases, callbacks, dynamic dispatch, generated code, and dependency injection may be absent.
+- **Debug** accepts an observed symptom or error and analyzes the complete selected file. The prompt requires ranked hypotheses and concrete logs, breakpoints, or tests, while keeping runtime claims explicitly uncertain. It consumes one normal explanation ticket and never executes repository code.
 - One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
 - Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
 - Repository comments and strings are treated as untrusted data. The model has no tools and Peritia never executes repository code.
@@ -163,6 +167,8 @@ Keep the `postgres` and `redis` named volumes: **do not run `docker compose down
 | app/page.tsx, app/globals.css            | Original interactive repository guide                                     |
 | components/account.tsx, app/features.css | Login dialog and account UI                                               |
 | components/ai-explanation.tsx            | Section selection, live generation output, and stale-response protection  |
+| components/control-flow-explorer.tsx     | Workflow selection and source-opening definition graph                    |
+| lib/control-flow.ts                      | Best-effort, evidence-labelled definition/call extraction                 |
 | server/auth.ts, server/store.ts          | Passwords, JWTs, Google OAuth, persistence                                |
 | server/ai.ts, server/gemini.ts           | Local-model validation, Gemini streaming, token and cost accounting       |
 | server/config.ts, server/app.ts          | Configuration validation and API routes                                   |
@@ -179,7 +185,7 @@ No live Google account login, real Gemini generation, browser interaction, or pu
 
 ## Other MVP limits
 
-Public repos only; up to 2,500 visible files, 16 initial source reads, and 64 KB per source. Binaries, common secret filenames, and known dependency/build directories are excluded; this is not a full secret scanner. GitHub rate limits can temporarily block imports. Import/symbol extraction is text-based; folder roles are inferred, not verified runtime architecture. Review progress stays in the page session. The original source snapshot beside this folder is historical and unchanged.
+Public repos only; up to 2,500 visible files, 16 initial source reads, and 64 KB per source. Binaries, common secret filenames, and known dependency/build directories are excluded; this is not a full secret scanner. GitHub rate limits can temporarily block imports. Import, symbol, and call-graph extraction is text-based; folder roles and workflow completeness are not verified runtime architecture. The original source snapshot beside this folder is historical and unchanged.
 
 ## Official references
 

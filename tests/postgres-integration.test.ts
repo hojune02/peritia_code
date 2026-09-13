@@ -190,6 +190,56 @@ test("password-only accounts receive exactly one three-ticket trial", async (t) 
   assert.equal(buckets.rows[0].allowance, 3);
 });
 
+test("debug jobs persist their symptom and isolate cache identity", async (t) => {
+  if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+  const userId = randomUUID();
+  await pool.query(
+    `INSERT INTO users(id,email,password) VALUES($1,$2,'stored-password-hash')`,
+    [userId, `${userId}@example.test`],
+  );
+  t.after(async () => {
+    await pool.query(`DELETE FROM users WHERE id=$1`, [userId]);
+    await pool.end();
+  });
+  const service = new ExplanationService(pool, getConfig({
+    APP_ORIGIN: "http://localhost:5173",
+    JWT_SECRET: randomBytes(32).toString("hex"),
+    AI_MODEL_REVISION: `debug-integration-${randomUUID()}`,
+  }));
+  const base = {
+    repositoryId: "sample",
+    commit: "sample",
+    path: "src/App.tsx",
+    level: "technical",
+    intent: "debug",
+  } as const;
+  const first = await service.submit(userId, randomUUID(), {
+    ...base,
+    question: "Saving a new task returns HTTP 500.",
+  });
+  const second = await service.submit(userId, randomUUID(), {
+    ...base,
+    question: "Deleting a task leaves the old row visible.",
+  });
+  assert.notEqual(first.job.id, second.job.id);
+  const jobs = await pool.query(
+    `SELECT cache_key,request_json FROM explanation_jobs WHERE id IN ($1,$2) ORDER BY id`,
+    [first.job.id, second.job.id],
+  );
+  assert.equal(jobs.rows.length, 2);
+  assert.notEqual(jobs.rows[0].cache_key, jobs.rows[1].cache_key);
+  assert(jobs.rows.every((row) => row.request_json.intent === "debug"));
+  assert.deepEqual(
+    new Set(jobs.rows.map((row) => row.request_json.question)),
+    new Set(["Saving a new task returns HTTP 500.", "Deleting a task leaves the old row visible."]),
+  );
+  await assert.rejects(
+    service.submit(userId, randomUUID(), { ...base, question: "it fails" }),
+    /at least 10 characters/,
+  );
+});
+
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {
   if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 12 });

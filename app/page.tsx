@@ -70,6 +70,7 @@ import { demoGuide } from "@/lib/demo";
 import { AccountControl, useAccount } from "@/components/account";
 import { GoProButton } from "@/components/billing";
 import { AIExplanation } from "@/components/ai-explanation";
+import { ControlFlowExplorer } from "@/components/control-flow-explorer";
 import { ThemeToggle } from "@/components/theme";
 import {
   describePath,
@@ -84,10 +85,11 @@ import { detectSourceLanguage } from "@/lib/source-language";
 
 const SourceCodeViewer = lazy(() => import("@/components/source-code-viewer"));
 
-type Section = "overview" | "architecture" | "files" | "technology" | "start";
+type Section = "overview" | "architecture" | "flows" | "files" | "technology" | "start";
 const sections = [
   { id: "overview", label: "Overview", icon: BookOpen },
   { id: "architecture", label: "Architecture", icon: Network },
+  { id: "flows", label: "Workflows", icon: GitBranch },
   { id: "files", label: "File explorer", icon: Folder },
   { id: "technology", label: "Technology stack", icon: Layers },
   { id: "start", label: "Reading path", icon: Compass },
@@ -97,6 +99,10 @@ const heading: Record<Section, [string, string]> = {
   architecture: [
     "Everything has a place.",
     "Explore how the repository is organized, from the root down.",
+  ],
+  flows: [
+    "One workflow at a time.",
+    "Trace observed definition and call relationships, then inspect the source behind each step.",
   ],
   files: [
     "Meet the source.",
@@ -603,6 +609,7 @@ export default function Home() {
     }
   }
   async function openSource(path: string) {
+    const requestedCommit = guide.commit;
     setSourcePath(path);
     setSourceContent("");
     setSourceError("");
@@ -626,7 +633,16 @@ export default function Home() {
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error || "Could not load this source file.");
-      if (request === sourceRequest.current) setSourceContent(result.content);
+      if (request === sourceRequest.current) {
+        setSourceContent(result.content);
+        // Grow the static workflow map only from files the user actually opens.
+        // The source remains server-fetched and commit-pinned; no eager full-repo
+        // download is introduced.
+        setGuide((current) => current.commit !== requestedCommit
+          || current.sources.some((source) => source.path === path)
+          ? current
+          : { ...current, sources: [...current.sources, { path, content: result.content }] });
+      }
     } catch (e) {
       if (request === sourceRequest.current)
         setSourceError(
@@ -935,20 +951,20 @@ export default function Home() {
               </div>
               <section className="reading-callout">
                 <span className="callout-icon">
-                  <Compass size={26} />
+                  <GitBranch size={26} />
                 </span>
                 <div>
-                  <span className="mini-label">NEW TO THIS CODEBASE?</span>
+                  <span className="mini-label">DIVIDE AND CONQUER</span>
                   <h2>
-                    Don't start with every file. Start with the right ones.
+                    Follow one workflow, then drill into the source.
                   </h2>
-                  <p>A short reading path to help the pieces click.</p>
+                  <p>Trace observed definition and call relationships without losing your place.</p>
                 </div>
                 <button
                   className="primary-button"
-                  onClick={() => navigate("start")}
+                  onClick={() => navigate("flows")}
                 >
-                  Take the guided tour
+                  Open workflows
                   <ArrowRight size={16} />
                 </button>
               </section>
@@ -1078,6 +1094,9 @@ export default function Home() {
               </div>
               <FileTree files={guide.files} query={query} onOpen={openSource} />
             </section>
+          )}
+          {section === "flows" && (
+            <ControlFlowExplorer guide={guide} onOpen={openSource} />
           )}
           {section === "technology" && (
             <>
@@ -1376,6 +1395,17 @@ export default function Home() {
             </p>
           </div>
           <div className="about-block">
+            <h3>Workflow-sized exploration</h3>
+            <p>
+              The Workflows view extracts function definitions and call-like
+              references from the initially inspected source files. It lets you
+              follow one path at a time and open each definition in the source
+              notebook; opening another code file grows the in-session map lazily.
+              The map is partial static evidence—not a runtime trace—and
+              can miss dynamic dispatch, aliases, callbacks, and dependency injection.
+            </p>
+          </div>
+          <div className="about-block">
             <h3>Whole-file explanations, streamed live</h3>
             <p>
               When you explicitly request an explanation, the complete selected
@@ -1384,6 +1414,15 @@ export default function Home() {
               and usable partial output is kept if the provider stops early.
               LLM receives that file—not the entire repository—and its
               explanation can still be incomplete or wrong.
+            </p>
+          </div>
+          <div className="about-block">
+            <h3>Debugging starts from an observed symptom</h3>
+            <p>
+              Debug mode sends your symptom and the complete selected public file
+              to the configured model. It asks for evidence, ranked hypotheses,
+              and concrete probes instead of claiming a verified root cause.
+              Peritia does not run the program or receive its runtime state.
             </p>
           </div>
           <div className="about-block">
@@ -1401,7 +1440,7 @@ export default function Home() {
             <p>
               PostgreSQL keeps accounts, revocable sessions, saved repository
               links, reviewed paths, explanation jobs, and usage. Eligible
-              Google accounts start with three beta explanations. Public source,
+              new accounts start with three trial tickets. Public source,
               repository snapshots, and matching explanation results may be
               reused from shared server caches. Deleting a saved repository
               removes your link and reading progress, but not GitHub's repository
