@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Braces, FileCode2, GitBranch, Info } from "lucide-react";
-import { buildControlFlowMap, type FlowNode } from "../lib/control-flow";
+import { ArrowRight, Braces, FileCode2, GitBranch, Info, Loader2, RefreshCw } from "lucide-react";
+import { buildControlFlowMap, type ControlFlowMap, type FlowNode } from "../lib/control-flow";
 import type { Guide } from "../lib/repository";
 
 function FlowNodeButton({ node, root, onOpen }: { node: FlowNode; root: boolean; onOpen: (path: string) => void }) {
@@ -27,20 +27,98 @@ function FlowEndpoint({ node, onOpen }: { node: FlowNode; onOpen: (path: string)
 }
 
 export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (path: string) => void }) {
-  const map = useMemo(() => buildControlFlowMap(guide), [guide]);
-  const [flowId, setFlowId] = useState(map.flows[0]?.id ?? "");
-  useEffect(() => setFlowId(map.flows[0]?.id ?? ""), [guide.commit, map.flows]);
-  const flow = map.flows.find((candidate) => candidate.id === flowId) ?? map.flows[0];
-  const nodeById = useMemo(() => new Map(map.nodes.map((node) => [node.id, node])), [map.nodes]);
-  const flowNodes = flow?.nodeIds.map((id) => nodeById.get(id)).filter((node): node is FlowNode => Boolean(node)) ?? [];
-  const flowEdges = map.edges.filter((edge) => flow?.edgeIds.includes(edge.id));
+  const localMap = useMemo(() => buildControlFlowMap(guide), [guide]);
+  const [remote, setRemote] = useState<{
+    id: string;
+    status: "queued" | "running" | "completed" | "failed";
+    filesTotal: number;
+    filesProcessed: number;
+    result: ControlFlowMap | null;
+    errorCode: string | null;
+  } | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const map = guide.sample ? localMap : remote?.result;
+  const [flowId, setFlowId] = useState("");
 
-  if (!map.nodes.length) {
+  useEffect(() => {
+    setFlowId("");
+    setRemote(null);
+    setLoadError("");
+    if (guide.sample) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const accept = async (response: Response) => {
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Workflow indexing is unavailable.");
+      if (!stopped) setRemote(body);
+      if (body.status === "failed")
+        throw new Error("Workflow indexing failed. Retry to queue a fresh attempt.");
+      return body as NonNullable<typeof remote>;
+    };
+    const poll = async (id: string) => {
+      if (stopped) return;
+      try {
+        const snapshot = await accept(await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
+          signal: controller.signal,
+        }));
+        if (snapshot.status === "queued" || snapshot.status === "running")
+          timer = setTimeout(() => void poll(id), 1_250);
+      } catch (error) {
+        if (!stopped && !(error instanceof DOMException && error.name === "AbortError"))
+          setLoadError(error instanceof Error ? error.message : "Workflow indexing is unavailable.");
+      }
+    };
+    void fetch("/api/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: guide.url, commit: guide.commit }),
+      signal: controller.signal,
+    }).then(accept).then((snapshot) => {
+      if (snapshot.status === "queued" || snapshot.status === "running") void poll(snapshot.id);
+    }).catch((error) => {
+      if (!stopped && !(error instanceof DOMException && error.name === "AbortError"))
+        setLoadError(error instanceof Error ? error.message : "Workflow indexing is unavailable.");
+    });
+    return () => {
+      stopped = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [guide.commit, guide.sample, guide.url, retry]);
+
+  const flow = map?.flows.find((candidate) => candidate.id === flowId) ?? map?.flows[0];
+  const nodeById = useMemo(() => new Map((map?.nodes ?? []).map((node) => [node.id, node])), [map]);
+  const flowNodes = flow?.nodeIds.map((id) => nodeById.get(id)).filter((node): node is FlowNode => Boolean(node)) ?? [];
+  const flowEdges = (map?.edges ?? []).filter((edge) => flow?.edgeIds.includes(edge.id));
+
+  if (!guide.sample && (loadError || !map || remote?.status === "queued")) {
+    const percent = remote?.filesTotal
+      ? Math.round((remote.filesProcessed / remote.filesTotal) * 100)
+      : 0;
+    return (
+      <section className="panel flow-indexing" aria-live="polite">
+        {loadError ? <RefreshCw size={28} /> : <Loader2 size={28} className="spin" />}
+        <h2>{loadError ? "Workflow indexing paused" : "Building the workflow overview"}</h2>
+        <p>{loadError || "Peritia is inspecting supported source files in the background. You can use every other part of the guide while this continues."}</p>
+        {!loadError && (
+          <>
+            <div className="flow-progress"><span style={{ width: `${percent}%` }} /></div>
+            <small>{remote?.filesTotal ? `${remote.filesProcessed.toLocaleString()} of ${remote.filesTotal.toLocaleString()} files indexed` : "Waiting for the workflow worker…"}</small>
+          </>
+        )}
+        {loadError && <button className="secondary-button" onClick={() => setRetry((value) => value + 1)}>Retry indexing</button>}
+      </section>
+    );
+  }
+
+  if (!map?.nodes.length) {
     return (
       <section className="panel flow-empty">
         <GitBranch size={28} />
         <h2>No function definitions were found in the inspected sources</h2>
-        <p>Open files from File explorer for direct source analysis. Markup, configuration, and unsupported syntax may not form a function graph.</p>
+        <p>The complete supported-file index contains no recognized definitions. Markup, configuration, generated files, or unsupported syntax may not form a function graph.</p>
       </section>
     );
   }
@@ -67,7 +145,7 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
       <section className="panel flow-canvas">
         <div className="section-heading">
           <div>
-            <span className="mini-label">OBSERVED DEFINITION + CALL REFERENCES</span>
+            <span className="mini-label">STATIC DEFINITION + CALL INDEX</span>
             <h2>{flow?.label ?? "Workflow"}()</h2>
           </div>
           <span className="method-badge">{flowNodes.length} definitions</span>
@@ -75,7 +153,9 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
         <div className="flow-disclaimer">
           <Info size={17} />
           <p>
-            This is a static, partial map of {map.inspectedFiles} inspected source files out of {map.visibleSourceFiles} visible code files.
+            {remote?.status === "running" ? "Indexing is still in progress. " : ""}
+            This static map covers {map.inspectedFiles} indexed source files out of {map.visibleSourceFiles} supported code files.
+            {map.failedFiles ? ` ${map.failedFiles} files were skipped or could not be indexed.` : ""}
             It is not a runtime trace; dynamic dispatch, aliases, dependency injection, callbacks, and generated code may be missing.
           </p>
         </div>
@@ -90,7 +170,7 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
                 return (
                   <div className="flow-edge" key={edge.id}>
                     <FlowEndpoint node={caller} onOpen={onOpen} />
-                    <span className="flow-edge-label"><small>calls · line {edge.callLine}</small><ArrowRight size={17} /></span>
+                    <span className="flow-edge-label"><small>{edge.evidence} · line {edge.callLine}</small><ArrowRight size={17} /></span>
                     <FlowEndpoint node={callee} onOpen={onOpen} />
                   </div>
                 );

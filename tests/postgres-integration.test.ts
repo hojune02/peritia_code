@@ -7,6 +7,7 @@ import { getConfig } from "../server/config";
 import { RepositoryLibrary } from "../server/repositories";
 import type { Guide } from "../lib/repository";
 import { BillingService } from "../server/billing";
+import { WorkflowIndexService, processWorkflowIndex, workflowAnalyzerVersion } from "../server/workflows";
 
 test("verified billing events grant Pro cycles and non-expiring refills exactly once", async (t) => {
   if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
@@ -238,6 +239,55 @@ test("debug jobs persist their symptom and isolate cache identity", async (t) =>
     service.submit(userId, randomUUID(), { ...base, question: "it fails" }),
     /at least 10 characters/,
   );
+});
+
+test("workflow indexing is commit-shared and reuses blob-level symbol indexes", async (t) => {
+  if (!process.env.DATABASE_URL) return t.skip("DATABASE_URL is not configured");
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  const repositoryId = `workflow-${randomUUID()}`;
+  const commit = createHash("sha1").update(randomUUID()).digest("hex");
+  const blob = createHash("sha1").update(randomUUID()).digest("hex");
+  const version = workflowAnalyzerVersion();
+  await pool.query(
+    `INSERT INTO repo_snapshots
+       (repository_id,owner,name,commit_sha,default_branch,tree_json,metadata_json)
+     VALUES($1,'workflow-owner','workflow-repo',$2,'main',$3,$4)`,
+    [repositoryId, commit, {
+      tree: [{ path: "src/main.ts", type: "blob", sha: blob, size: 100 }],
+    }, { description: "Workflow fixture" }],
+  );
+  await pool.query(
+    `INSERT INTO workflow_file_indexes(blob_sha,language,analyzer_version,result_json)
+     VALUES($1,'ts',$2,$3)`,
+    [blob, version, {
+      definitions: [{ name: "main", line: 1, endLine: 3, exported: true, calls: [] }],
+    }],
+  );
+  t.after(async () => {
+    await pool.query(`DELETE FROM repo_snapshots WHERE repository_id=$1`, [repositoryId]);
+    await pool.query(`DELETE FROM workflow_file_indexes WHERE blob_sha=$1`, [blob]);
+    await pool.end();
+  });
+  const service = new WorkflowIndexService(pool);
+  const first = await service.request({
+    repo: "workflow-owner/workflow-repo",
+    commit,
+  });
+  const second = await service.request({
+    repo: "workflow-owner/workflow-repo",
+    commit,
+  });
+  assert.equal(first.id, second.id);
+  const outbox = await pool.query(
+    `SELECT COUNT(*)::int count FROM workflow_job_outbox WHERE workflow_index_id=$1`,
+    [first.id],
+  );
+  assert.equal(outbox.rows[0].count, 1);
+  await processWorkflowIndex(pool, first.id);
+  const completed = await service.get(first.id);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.filesProcessed, 1);
+  assert.equal(completed.result?.nodes[0]?.name, "main");
 });
 
 test("one remaining credit accepts only one of ten concurrent jobs", async (t) => {

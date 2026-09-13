@@ -609,7 +609,6 @@ export default function Home() {
     }
   }
   async function openSource(path: string) {
-    const requestedCommit = guide.commit;
     setSourcePath(path);
     setSourceContent("");
     setSourceError("");
@@ -635,13 +634,6 @@ export default function Home() {
         throw new Error(result.error || "Could not load this source file.");
       if (request === sourceRequest.current) {
         setSourceContent(result.content);
-        // Grow the static workflow map only from files the user actually opens.
-        // The source remains server-fetched and commit-pinned; no eager full-repo
-        // download is introduced.
-        setGuide((current) => current.commit !== requestedCommit
-          || current.sources.some((source) => source.path === path)
-          ? current
-          : { ...current, sources: [...current.sources, { path, content: result.content }] });
       }
     } catch (e) {
       if (request === sourceRequest.current)
@@ -1397,11 +1389,11 @@ export default function Home() {
           <div className="about-block">
             <h3>Workflow-sized exploration</h3>
             <p>
-              The Workflows view extracts function definitions and call-like
-              references from the initially inspected source files. It lets you
-              follow one path at a time and open each definition in the source
-              notebook; opening another code file grows the in-session map lazily.
-              The map is partial static evidence—not a runtime trace—and
+              A background worker indexes supported source files into compact
+              function and call metadata shared by immutable commit. The Workflows
+              view can therefore show the repository-wide static overview without
+              sending every source file to your browser; exact source still loads
+              only when you open a node. The map is static evidence—not a runtime trace—and
               can miss dynamic dispatch, aliases, callbacks, and dependency injection.
             </p>
           </div>

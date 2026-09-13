@@ -6,10 +6,11 @@ export function createQueue(redisUrl = process.env.REDIS_URL) {
   if (!redisUrl) throw new Error("REDIS_URL is required");
   const connection = new IORedis(redisUrl, { maxRetriesPerRequest: 1 });
   const queue = new Queue("explanations", { connection });
-  return { connection, queue };
+  const workflowQueue = new Queue("workflows", { connection });
+  return { connection, queue, workflowQueue };
 }
 
-export function startOutboxDispatcher(pool: Pool, queue: Queue) {
+export function startOutboxDispatcher(pool: Pool, queue: Queue, workflowQueue?: Queue) {
   let stopped = false;
   let active = false;
   const dispatch = async () => {
@@ -32,8 +33,28 @@ export function startOutboxDispatcher(pool: Pool, queue: Queue) {
           [jobId],
         );
       }
+      if (workflowQueue) {
+        const workflowPending = await pool.query(
+          `SELECT id,workflow_index_id FROM workflow_job_outbox
+           WHERE dispatched_at IS NULL ORDER BY created_at LIMIT 10`,
+        );
+        for (const { id, workflow_index_id: workflowIndexId } of workflowPending.rows) {
+          await workflowQueue.add("index-workflows", { workflowIndexId }, {
+            jobId: `${workflowIndexId}:${id}`,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: 100,
+            removeOnFail: 500,
+          });
+          await pool.query(
+            `UPDATE workflow_job_outbox SET dispatched_at=NOW()
+             WHERE id=$1 AND dispatched_at IS NULL`,
+            [id],
+          );
+        }
+      }
     } catch (error) {
-      console.error("Explanation outbox dispatch failed:", error);
+      console.error("Job outbox dispatch failed:", error);
     } finally {
       active = false;
     }

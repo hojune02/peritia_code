@@ -9,28 +9,31 @@ import { ExplanationService } from "./explanations";
 import { BillingService, billingOptions } from "./billing";
 import { createQueue, startOutboxDispatcher } from "./queue";
 import { RepositoryLibrary } from "./repositories";
+import { WorkflowIndexService } from "./workflows";
 
 const config = getConfig();
 const store = new PostgresStore();
 const explanations = new ExplanationService(db, config);
 const repositories = new RepositoryLibrary(db);
+const workflows = new WorkflowIndexService(db);
 const billing = config.billingEnabled
   ? new BillingService(db, billingOptions())
   : undefined;
 const stopBillingProcessor = billing?.startProcessor() || (() => undefined);
 const queueResources = createQueue();
-const stopDispatcher = startOutboxDispatcher(db, queueResources.queue);
+const stopDispatcher = startOutboxDispatcher(db, queueResources.queue, queueResources.workflowQueue);
 const ready = async () => {
   await Promise.all([
     db.query("SELECT 1"),
     queueResources.connection.ping(),
     db.query(
-      `SELECT 1 FROM worker_health
-       WHERE worker_name='explanations' AND heartbeat_at > NOW() - INTERVAL '30 seconds'`,
-    ).then((result) => { if (!result.rows[0]) throw new Error("WORKER_NOT_READY"); }),
+      `SELECT COUNT(*)::int count FROM worker_health
+       WHERE worker_name IN ('explanations','workflows')
+         AND heartbeat_at > NOW() - INTERVAL '30 seconds'`,
+    ).then((result) => { if (Number(result.rows[0]?.count) !== 2) throw new Error("WORKER_NOT_READY"); }),
   ]);
 };
-const app = createApp(config, store, { explanations, billing, repositories, ready });
+const app = createApp(config, store, { explanations, workflows, billing, repositories, ready });
 
 // One origin for both the React frontend and Express API.
 if (process.env.NODE_ENV !== "development") {
@@ -59,6 +62,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       stopBillingProcessor();
       void Promise.all([
         queueResources.queue.close(),
+        queueResources.workflowQueue.close(),
         queueResources.connection.quit(),
         store.close(),
       ]).finally(() => process.exit(0));

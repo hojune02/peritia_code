@@ -46,7 +46,7 @@ The default local model download is about 4.7 GB; it also needs memory for the m
 - Express fetches the selected file itself at the guide's immutable Git commit. Client-supplied code or prompts are not accepted as context.
 - Signed-in users get an isolated repository library. Per-user rows link to shared immutable GitHub snapshots instead of duplicating trees or source content; only the lightweight list loads initially, and a guide/source loads when opened.
 - Opening a source file uses a desktop split view: exact commit-pinned source with language-aware syntax highlighting on the left and the explanation notebook on the right. Narrow screens retain tabs, and the syntax engine is loaded only when the viewer opens.
-- **Workflows** links call-like references to unique function definitions found in the inspected sources. Nodes open the existing source notebook, and opening another code file grows the in-session map lazily rather than downloading the whole repository. This is deliberately labelled as partial static evidence, not runtime control flow; aliases, callbacks, dynamic dispatch, generated code, and dependency injection may be absent.
+- **Workflows** is indexed asynchronously across every supported, size-bounded source file after import. The worker stores compact function/call metadata by Git blob SHA and a shared final graph by immutable commit, so unchanged files are reused across commits. The browser receives graph metadata only; exact source remains lazy until a node opens the notebook. This is deliberately labelled as static evidence, not runtime control flow; aliases, callbacks, dynamic dispatch, generated code, and dependency injection may be absent.
 - **Debug** accepts an observed symptom or error and analyzes the complete selected file. The prompt requires ranked hypotheses and concrete logs, breakpoints, or tests, while keeping runtime claims explicitly uncertain. It consumes one normal explanation ticket and never executes repository code.
 - One explanation sends the **complete selected file** in ordered chunks of at most 80 lines and 12,000 characters. Every accepted line is sent; a pathological line that cannot fit is rejected instead of silently clipped. This is whole-file analysis, not a claim that Gemini read the entire repository.
 - Gemini's GitHub-flavored Markdown is streamed directly and is not blocked by a structured-output validator. Each chunk gets a generous output budget; a `MAX_TOKENS` finish triggers up to two continuation calls. Provider limits and failures can still produce a clearly labelled partial result, so users must verify line references and conclusions against the Source code tab.
@@ -100,6 +100,8 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | JWT_SECRET                              | Random secret of at least 32 bytes. `npm run setup` generates one. Keep stable across restarts; changing it signs everyone out. |
 | DATABASE_URL                            | PostgreSQL connection used by the API, worker, migrations, and durable caches.                                                  |
 | REDIS_URL                               | Redis connection used by the explanation outbox dispatcher and worker.                                                         |
+| WORKFLOW_ANALYZER_VERSION               | Cache revision for static workflow metadata. Change it when extraction rules change; defaults to `workflow-v2`.                 |
+| WORKFLOW_WORKER_CONCURRENCY             | Separate workflow-index queue concurrency. Keep at `1` on the Oracle free VM.                                                   |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
 | AI_PROVIDER                             | `ollama` for local development or `gemini` for the production worker.                                                                  |
 | GEMINI_API_KEY                          | Server-only Gemini credential. Required when `AI_PROVIDER=gemini`.                                                                     |
@@ -172,7 +174,8 @@ Keep the `postgres` and `redis` named volumes: **do not run `docker compose down
 | server/auth.ts, server/store.ts          | Passwords, JWTs, Google OAuth, persistence                                |
 | server/ai.ts, server/gemini.ts           | Local-model validation, Gemini streaming, token and cost accounting       |
 | server/config.ts, server/app.ts          | Configuration validation and API routes                                   |
-| server/github.ts, lib/repository.ts      | Public GitHub ingestion and static analysis                               |
+| server/github.ts, lib/repository.ts      | Public GitHub ingestion and repository facts                              |
+| server/workflows.ts                     | Durable background workflow indexing and blob-level reuse                 |
 | tests/features.test.ts                   | HTTP/auth and AI contract tests                                           |
 | TESTING.md                               | Manual tests, API commands, and model accuracy review                     |
 | compose.yaml, Dockerfile, Caddyfile      | Single-machine HTTPS deployment                                           |

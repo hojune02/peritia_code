@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { SignJWT, decodeJwt, generateKeyPair } from "jose";
-import { createApp, type RepositoryEndpoints } from "../server/app";
+import { createApp, type RepositoryEndpoints, type WorkflowEndpoints } from "../server/app";
 import { Store } from "../server/store";
 import { getConfig } from "../server/config";
 import {
@@ -132,6 +132,24 @@ test("workflow map links observed call references to unique definitions", () => 
   assert.equal(map.flows[0].rootId, start.id);
 });
 
+test("workflow map keeps every disconnected definition discoverable", () => {
+  const functions = Array.from(
+    { length: 20 },
+    (_, index) => `export function workflow${index + 1}() { return ${index + 1}; }`,
+  ).join("\n");
+  const map = buildControlFlowMap({
+    files: [{ path: "src/workflows.ts", type: "blob", sha: "1" }],
+    sources: [{ path: "src/workflows.ts", content: functions }],
+  });
+
+  assert.equal(map.nodes.length, 20);
+  assert.equal(map.flows.length, 20);
+  assert.deepEqual(
+    new Set(map.flows.flatMap((flow) => flow.nodeIds)),
+    new Set(map.nodes.map((node) => node.id)),
+  );
+});
+
 test("billing webhook verification rejects malformed and altered signatures", () => {
   const body = Buffer.from('{"event":"subscription_created"}');
   const secret = "test-webhook-secret";
@@ -234,6 +252,7 @@ async function fixture(
     googleVerify?: typeof verifyGoogleToken;
     production?: boolean;
     repositories?: RepositoryEndpoints;
+    workflows?: WorkflowEndpoints;
     billing?: BillingService;
   } = {},
 ) {
@@ -253,6 +272,7 @@ async function fixture(
       return { ...output, status: "generated" } as Explanation;
     },
     repositories: options.repositories,
+    workflows: options.workflows,
     billing: options.billing,
   });
   const server = app.listen(0, "127.0.0.1");
@@ -412,6 +432,51 @@ test("repository library endpoints use the authenticated account identity", asyn
   assert.deepEqual(opened, [first.user.id]);
   assert.deepEqual(removed, [first.user.id]);
   assert.deepEqual(reviewed, [second.user.id]);
+});
+test("workflow index endpoints expose shared progress without loading source in the browser", async (t) => {
+  const requested: unknown[] = [];
+  const id = "123e4567-e89b-42d3-a456-426614174000";
+  const workflows: WorkflowEndpoints = {
+    request: async (input) => {
+      requested.push(input);
+      return {
+        id,
+        status: "running",
+        filesTotal: 120,
+        filesProcessed: 48,
+        result: null,
+        errorCode: null,
+      };
+    },
+    get: async (requestedId) => ({
+      id: requestedId,
+      status: "completed",
+      filesTotal: 120,
+      filesProcessed: 120,
+      result: {
+        nodes: [], edges: [], flows: [], unresolvedCalls: 0,
+        inspectedFiles: 120, visibleSourceFiles: 120,
+      },
+      errorCode: null,
+    }),
+  };
+  const f = await fixture(t, { workflows });
+  const started = await f.post("/api/workflows", {
+    repo: "https://github.com/example/repo",
+    commit: "a".repeat(40),
+  });
+  assert.equal(started.status, 202);
+  assert.deepEqual(await started.json(), {
+    id, status: "running", filesTotal: 120, filesProcessed: 48,
+    result: null, errorCode: null,
+  });
+  assert.deepEqual(requested, [{
+    repo: "https://github.com/example/repo",
+    commit: "a".repeat(40),
+  }]);
+  const completed = await f.get(`/api/workflows/${id}`);
+  assert.equal(completed.status, 200);
+  assert.equal((await completed.json()).filesProcessed, 120);
 });
 test("billing checkout requires authentication, validates purchase type, and uses account identity", async (t) => {
   const purchases: Array<{ userId: string; kind: string }> = [];

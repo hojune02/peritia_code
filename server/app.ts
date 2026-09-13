@@ -8,8 +8,10 @@ import type { AuthStore } from "./auth-store";
 import type { ExplanationService } from "./explanations";
 import type { BillingService } from "./billing";
 import type { RepositoryLibrary } from "./repositories";
+import type { WorkflowIndexService } from "./workflows";
 
 export type RepositoryEndpoints = Pick<RepositoryLibrary, "save" | "list" | "open" | "remove" | "setReviewed">;
+export type WorkflowEndpoints = Pick<WorkflowIndexService, "request" | "get">;
 
 export function createApp(
   config: Config,
@@ -20,6 +22,7 @@ export function createApp(
     explanations?: ExplanationService;
     billing?: BillingService;
     repositories?: RepositoryEndpoints;
+    workflows?: WorkflowEndpoints;
     ready?: () => Promise<void>;
   } = {},
 ) {
@@ -151,6 +154,27 @@ export function createApp(
       res.json(await jobs.usage(res.locals.user.id));
     });
   }
+  if (dependencies.workflows) {
+    const workflows = dependencies.workflows;
+    app.post(
+      "/api/workflows",
+      limiter(30, 60 * 60 * 1000, (req) => req.ip || "unknown"),
+      async (req, res) => {
+        const index = await workflows.request({
+          repo: req.body?.repo,
+          commit: req.body?.commit,
+        });
+        res.status(index.status === "completed" ? 200 : 202).json(index);
+      },
+    );
+    app.get(
+      "/api/workflows/:id",
+      limiter(600, 60 * 60 * 1000, (req) => req.ip || "unknown"),
+      async (req, res) => {
+        res.json(await workflows.get(String(req.params.id)));
+      },
+    );
+  }
   if (config.billingEnabled && dependencies.billing) {
     app.post(
       "/api/billing/checkout",
@@ -212,6 +236,10 @@ export function createApp(
       const guide = await analyzeRepository(req.body?.repo);
       if (res.locals.user && dependencies.repositories)
         await dependencies.repositories.save(res.locals.user.id, guide);
+      if (dependencies.workflows) {
+        await dependencies.workflows.request({ repo: guide.url, commit: guide.commit })
+          .catch((error) => console.error("Workflow indexing could not be queued:", error));
+      }
       res.json(guide);
     } catch (error) {
       next(error);

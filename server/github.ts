@@ -325,6 +325,24 @@ export async function readSource(
   });
 }
 
+/**
+ * Workflow indexing needs to inspect source once, but must not turn the
+ * display-source cache into an eager copy of the whole repository. The caller
+ * persists only compact symbol/call metadata keyed by Git blob SHA.
+ */
+export async function readSourceForIndexing(
+  repo: unknown,
+  commitValue: unknown,
+  pathValue: unknown,
+): Promise<SourceFile> {
+  const { owner, name } = parseRepo(repo);
+  const commit = validateCommit(commitValue);
+  const path = validateSourcePath(pathValue);
+  if (!isSafeSource(path) || path.startsWith("/") || path.includes("\\"))
+    throw new RepoError("This file is excluded from analysis for safety.", 400);
+  return fetchSourceFromGitHub({ owner, name, commit, path });
+}
+
 function selectRepositoryFiles(
   tree: GitHubTree,
 ): RepoFile[] {
