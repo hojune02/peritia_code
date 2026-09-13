@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import {
   buildControlFlowMapFromIndexes,
-  indexWorkflowSource,
   isWorkflowSourcePath,
   workflowLanguage,
   type ControlFlowMap,
   type WorkflowFileIndex,
 } from "../lib/control-flow";
+import { indexWorkflowSourceWithAst } from "./typescript-workflow";
 import { isSafeSource, parseRepo, RepoError, type RepoFile } from "../lib/repository";
 import { validateCommit } from "./github-input";
 import { readSourceForIndexing } from "./github";
@@ -45,7 +45,7 @@ export function workflowAnalyzerVersion() {
   const configured = process.env.WORKFLOW_ANALYZER_VERSION?.trim();
   return configured && /^[A-Za-z0-9._-]{1,80}$/.test(configured)
     ? configured
-    : "workflow-v2";
+    : "workflow-v3-typescript-ast";
 }
 
 function publicIndex(row: WorkflowRow): WorkflowIndexSnapshot {
@@ -190,7 +190,7 @@ async function fileIndex(
   const source = opened.rows[0]
     ? { path: input.file.path, content: opened.rows[0].content }
     : await readSourceForIndexing(input.repo, input.commit, input.file.path);
-  const indexed = indexWorkflowSource(source);
+  const indexed = await indexWorkflowSourceWithAst(source);
   await pool.query(
     `INSERT INTO workflow_file_indexes
        (blob_sha,language,analyzer_version,result_json)

@@ -100,7 +100,7 @@ Email verification, forgotten-password recovery, account deletion UI, MFA, and a
 | JWT_SECRET                              | Random secret of at least 32 bytes. `npm run setup` generates one. Keep stable across restarts; changing it signs everyone out. |
 | DATABASE_URL                            | PostgreSQL connection used by the API, worker, migrations, and durable caches.                                                  |
 | REDIS_URL                               | Redis connection used by the explanation outbox dispatcher and worker.                                                         |
-| WORKFLOW_ANALYZER_VERSION               | Cache revision for static workflow metadata. Change it when extraction rules change; defaults to `workflow-v2`.                 |
+| WORKFLOW_ANALYZER_VERSION               | Cache revision for static workflow metadata. TypeScript-family files use AST extraction; defaults to `workflow-v3-typescript-ast`. |
 | WORKFLOW_WORKER_CONCURRENCY             | Separate workflow-index queue concurrency. Keep at `1` on the Oracle free VM.                                                   |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Both set to enable Google, both empty to disable it. Server only.                                                               |
 | AI_PROVIDER                             | `ollama` for local development or `gemini` for the production worker.                                                                  |

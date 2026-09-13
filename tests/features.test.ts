@@ -23,6 +23,7 @@ import { verifyWebhook, type BillingService } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
 import { buildControlFlowMap } from "../lib/control-flow";
+import { indexTypeScriptWorkflowSource } from "../server/typescript-workflow";
 import { workflowQueueJobId } from "../server/queue";
 
 const config = getConfig({
@@ -131,6 +132,58 @@ test("workflow map links observed call references to unique definitions", () => 
   assert.equal(map.visibleSourceFiles, 4);
   assert(map.unresolvedCalls >= 2, "external call-like references stay explicitly unresolved");
   assert.equal(map.flows[0].rootId, start.id);
+});
+
+test("TypeScript workflow AST preserves nested function boundaries", async () => {
+  const indexed = await indexTypeScriptWorkflowSource({
+    path: "server/gemini.ts",
+    content: [
+      "async function consumeSse() {",
+      "  const open = connect();",
+      "  const dispatch = async () => {",
+      "    await handleEvent();",
+      "  };",
+      "  dispatch();",
+      "  return finish(open);",
+      "}",
+    ].join("\n"),
+  });
+
+  const consume = indexed.definitions.find((item) => item.name === "consumeSse");
+  const dispatch = indexed.definitions.find((item) => item.name === "dispatch");
+  assert(consume && dispatch);
+  assert.equal(consume.line, 1);
+  assert.equal(consume.endLine, 8);
+  assert.equal(dispatch.line, 3);
+  assert.equal(dispatch.endLine, 5);
+  assert.deepEqual(consume.calls, [
+    { name: "connect", line: 2 },
+    { name: "dispatch", line: 6 },
+    { name: "finish", line: 7 },
+  ]);
+  assert.deepEqual(dispatch.calls, [{ name: "handleEvent", line: 4 }]);
+});
+
+test("TypeScript workflow AST indexes methods and ignores call-like text", async () => {
+  const indexed = await indexTypeScriptWorkflowSource({
+    path: "src/service.tsx",
+    content: [
+      "export class Service {",
+      "  public load() {",
+      "    const example = 'notARealCall()';",
+      "    return this.fetchData();",
+      "  }",
+      "}",
+      "export const View = () => <button onClick={() => submitForm()}>Save</button>;",
+    ].join("\n"),
+  });
+
+  const load = indexed.definitions.find((item) => item.name === "load");
+  const view = indexed.definitions.find((item) => item.name === "View");
+  assert(load && view);
+  assert.equal(load.exported, true);
+  assert.deepEqual(load.calls, [{ name: "fetchData", line: 4 }]);
+  assert.deepEqual(view.calls, [{ name: "submitForm", line: 7 }]);
 });
 
 test("workflow map keeps every disconnected definition discoverable", () => {
