@@ -2,6 +2,10 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import type { Pool } from "pg";
 
+export function workflowQueueJobId(workflowIndexId: string, outboxId: string | number) {
+  return `workflow-${workflowIndexId}-${outboxId}`;
+}
+
 export function createQueue(redisUrl = process.env.REDIS_URL) {
   if (!redisUrl) throw new Error("REDIS_URL is required");
   const connection = new IORedis(redisUrl, { maxRetriesPerRequest: 1 });
@@ -40,7 +44,10 @@ export function startOutboxDispatcher(pool: Pool, queue: Queue, workflowQueue?: 
         );
         for (const { id, workflow_index_id: workflowIndexId } of workflowPending.rows) {
           await workflowQueue.add("index-workflows", { workflowIndexId }, {
-            jobId: `${workflowIndexId}:${id}`,
+            // BullMQ reserves ':' as an internal key separator and rejects it
+            // in custom job IDs. Keep the durable outbox ID in the key so a
+            // repeated dispatcher pass remains idempotent.
+            jobId: workflowQueueJobId(workflowIndexId, id),
             attempts: 3,
             backoff: { type: "exponential", delay: 5_000 },
             removeOnComplete: 100,

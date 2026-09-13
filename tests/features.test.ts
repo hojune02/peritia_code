@@ -23,6 +23,7 @@ import { verifyWebhook, type BillingService } from "../server/billing";
 import { estimateGeminiCost, GeminiGenerationError, generateWithGemini } from "../server/gemini";
 import { createHmac } from "node:crypto";
 import { buildControlFlowMap } from "../lib/control-flow";
+import { workflowQueueJobId } from "../server/queue";
 
 const config = getConfig({
   APP_ORIGIN: "http://localhost:5173",
@@ -148,6 +149,12 @@ test("workflow map keeps every disconnected definition discoverable", () => {
     new Set(map.flows.flatMap((flow) => flow.nodeIds)),
     new Set(map.nodes.map((node) => node.id)),
   );
+});
+
+test("workflow queue IDs avoid BullMQ's reserved colon separator", () => {
+  const id = workflowQueueJobId("36c617e3-6297-43a7-98ef-a291ed68a90d", 42);
+  assert.equal(id, "workflow-36c617e3-6297-43a7-98ef-a291ed68a90d-42");
+  assert.equal(id.includes(":"), false);
 });
 
 test("billing webhook verification rejects malformed and altered signatures", () => {
