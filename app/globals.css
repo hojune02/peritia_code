@@ -222,6 +222,10 @@ code {
   border-top: 1px solid #2b4136;
   border-bottom: 1px solid #2b4136;
 }
+.peritia-sidebar [data-slot="sidebar-content"] {
+  gap: 0;
+  overflow: hidden;
+}
 .overline {
   font-size: 12px;
   letter-spacing: 1.4px;
@@ -272,6 +276,11 @@ code {
 .saved-repositories {
   padding: 22px 12px 18px;
   border-bottom: 1px solid #2b4136;
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 132px;
+  flex-direction: column;
 }
 .saved-repositories > .overline {
   padding: 0 8px;
@@ -280,6 +289,8 @@ code {
 .saved-repository-list {
   display: grid;
   gap: 3px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .saved-repository {
   display: grid;
@@ -362,6 +373,7 @@ code {
 }
 .guide-nav {
   padding: 25px 12px;
+  flex: 1 0 auto;
 }
 .guide-nav > .overline {
   padding-left: 12px;
@@ -387,27 +399,9 @@ code {
   color: #a9bea1;
   margin-left: auto;
 }
-.sidebar-note {
-  margin: 12px 14px 14px;
-  padding: 20px 12px 23px;
-  border-bottom: 1px solid #2d4739;
-}
-.tiny-orbit {
-  display: block;
-  color: #b2d094;
-  margin-bottom: 14px;
-}
-.sidebar-note strong {
-  font-size: 14px;
-  color: #d6e3d2;
-  font-weight: 500;
-  display: block;
-}
-.sidebar-note p {
-  font-size: 12px;
-  color: #a6b9ac;
-  line-height: 1.85;
-  margin-top: 7px;
+.peritia-sidebar [data-slot="sidebar-footer"] {
+  flex: 0 0 auto;
+  border-top: 1px solid #2d4739;
 }
 .about-button {
   display: flex;
@@ -415,7 +409,7 @@ code {
   align-items: center;
   font-size: 12px;
   color: #b0c5b5;
-  padding: 10px 12px 17px;
+  padding: 11px 12px;
 }
 .about-button svg:last-child {
   margin-left: auto;

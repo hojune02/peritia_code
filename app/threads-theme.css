@@ -210,7 +210,7 @@ summary:focus-visible {
 
 .repo-context,
 .saved-repositories,
-.sidebar-note {
+.peritia-sidebar [data-slot="sidebar-footer"] {
   border-color: var(--hairline);
 }
 
@@ -228,7 +228,6 @@ summary:focus-visible {
 }
 
 .repo-label strong,
-.sidebar-note strong,
 .saved-repository strong {
   color: var(--text-primary);
 }
@@ -238,13 +237,11 @@ summary:focus-visible {
 .saved-repository small,
 .saved-repositories-note,
 .nav-index,
-.sidebar-note p,
 .about-button,
 .account-email {
   color: var(--text-secondary);
 }
 
-.tiny-orbit,
 .import-ribbon > span,
 .sample-label,
 .map-root-icon,
@@ -275,6 +272,37 @@ summary:focus-visible {
 
 .new-repo {
   border-radius: 12px;
+}
+
+.repo-context {
+  padding: 18px 20px;
+}
+
+.repo-label {
+  margin-top: 12px;
+}
+
+.new-repo {
+  margin-top: 12px;
+}
+
+.saved-repositories {
+  padding-top: 16px;
+  padding-bottom: 14px;
+}
+
+.guide-nav {
+  padding-top: 18px;
+  padding-bottom: 14px;
+}
+
+.nav-item {
+  height: 43px !important;
+  margin-bottom: 2px;
+}
+
+.peritia-sidebar [data-slot="sidebar-footer"] {
+  padding: 6px 12px;
 }
 
 .new-repo:hover,

@@ -244,17 +244,6 @@ function RepoNavigation({
         </div>
       </SidebarContent>
       <SidebarFooter>
-        <div className="sidebar-note">
-          <span className="tiny-orbit">
-            <Compass size={21} />
-          </span>
-          <strong>Code is easier with context.</strong>
-          <p>
-            No stack knowledge required.
-            <br />
-            Start with the big picture.
-          </p>
-        </div>
         <button className="about-button" onClick={onAbout}>
           <ShieldCheck size={16} /> How this guide is made
           <ArrowUpRight size={14} />
