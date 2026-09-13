@@ -345,7 +345,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           ) : (
             <div className="billing-offer">
               <span className="mini-label">PERITIA PRO</span>
-              <strong>$9 <small>per month</small></strong>
+              <strong>$9.99 <small>per month</small></strong>
               <p><Ticket size={16} /> 100 explanation tickets every billing cycle</p>
               <ul>
                 <li>Complete-file, streamed LLM explanations</li>

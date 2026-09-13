@@ -35,7 +35,7 @@ export function AIExplanation({
       </span>
       <h3>Understand the code</h3>
       <p className="metadata-note">
-        The complete selected public file is explained in ordered chunks. Gemini's
+        The complete selected public file is explained in ordered chunks. LLM's
         Markdown streams directly; verify its conclusions against the source.
       </p>
       <p className="ai-file-scope">Entire file · {total.toLocaleString()} lines</p>

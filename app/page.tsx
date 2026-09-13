@@ -1371,7 +1371,7 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>How Peritia works today.</DialogTitle>
             <DialogDescription>
-              What is inspected, what Gemini receives, and what Peritia keeps.
+              What is inspected, what LLM receives, and what Peritia keeps.
             </DialogDescription>
           </DialogHeader>
           <div className="about-block">
@@ -1389,7 +1389,7 @@ export default function Home() {
             <p>
               When you explicitly request an explanation, the complete selected
               public file is sent to LLM in ordered chunks of up to 80 lines
-              and 12,000 characters. Gemini's Markdown appears as it arrives,
+              and 12,000 characters. LLM's Markdown appears as it arrives,
               and usable partial output is kept if the provider stops early.
               LLM receives that file—not the entire repository—and its
               explanation can still be incomplete or wrong.
