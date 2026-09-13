@@ -70,6 +70,7 @@ import { demoGuide } from "@/lib/demo";
 import { AccountControl, useAccount } from "@/components/account";
 import { GoProButton } from "@/components/billing";
 import { AIExplanation } from "@/components/ai-explanation";
+import { ThemeToggle } from "@/components/theme";
 import {
   describePath,
   sourceUrl,
@@ -769,6 +770,7 @@ export default function Home() {
             </span>
           </div>
           <div className="topbar-actions">
+            <ThemeToggle />
             <GoProButton />
             <AccountControl />
             {!guide.sample && (

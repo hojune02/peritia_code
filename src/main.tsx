@@ -4,13 +4,17 @@ import "../app/globals.css";
 import "../app/features.css";
 import { AccountProvider } from "../components/account";
 import { BillingProvider } from "../components/billing";
+import { ThemeProvider } from "../components/theme";
+import "../app/threads-theme.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root.");
 createRoot(root).render(
-  <AccountProvider>
-    <BillingProvider>
-      <Home />
-    </BillingProvider>
-  </AccountProvider>,
+  <ThemeProvider>
+    <AccountProvider>
+      <BillingProvider>
+        <Home />
+      </BillingProvider>
+    </AccountProvider>
+  </ThemeProvider>,
 );

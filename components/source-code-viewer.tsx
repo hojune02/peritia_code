@@ -2,17 +2,17 @@ import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { detectSourceLanguage } from "../lib/source-language";
 
 const terminalTheme: PrismTheme = {
-  plain: { color: "#d8e6dc", backgroundColor: "#08110d" },
+  plain: { color: "var(--code-text)", backgroundColor: "var(--code-bg)" },
   styles: [
-    { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "#789987", fontStyle: "italic" } },
-    { types: ["punctuation"], style: { color: "#a9c5b2" } },
-    { types: ["property", "tag", "constant", "symbol", "deleted"], style: { color: "#ff8f8f" } },
-    { types: ["boolean", "number"], style: { color: "#e7c66b" } },
-    { types: ["selector", "attr-name", "string", "char", "builtin", "inserted"], style: { color: "#9ee493" } },
-    { types: ["operator", "entity", "url"], style: { color: "#74d7ec" } },
-    { types: ["atrule", "attr-value", "keyword"], style: { color: "#c7a8ff" } },
-    { types: ["function", "class-name"], style: { color: "#78e0b0" } },
-    { types: ["regex", "important", "variable"], style: { color: "#ffbd78" } },
+    { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "var(--syntax-comment)", fontStyle: "italic" } },
+    { types: ["punctuation"], style: { color: "var(--syntax-punctuation)" } },
+    { types: ["property", "tag", "constant", "symbol", "deleted"], style: { color: "var(--syntax-red)" } },
+    { types: ["boolean", "number"], style: { color: "var(--syntax-yellow)" } },
+    { types: ["selector", "attr-name", "string", "char", "builtin", "inserted"], style: { color: "var(--syntax-green)" } },
+    { types: ["operator", "entity", "url"], style: { color: "var(--syntax-blue)" } },
+    { types: ["atrule", "attr-value", "keyword"], style: { color: "var(--syntax-purple)" } },
+    { types: ["function", "class-name"], style: { color: "var(--syntax-cyan)" } },
+    { types: ["regex", "important", "variable"], style: { color: "var(--syntax-orange)" } },
   ],
 };
 
