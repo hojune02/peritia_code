@@ -489,6 +489,7 @@ export default function Home() {
   const [tech, setTech] = useState<Tech | null>(null);
   const [query, setQuery] = useState("");
   const [sourcePath, setSourcePath] = useState<string | null>(null);
+  const [sourceTargetLine, setSourceTargetLine] = useState<number | null>(null);
   const [sourceContent, setSourceContent] = useState("");
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState("");
@@ -642,12 +643,13 @@ export default function Home() {
       setLoading(false);
     }
   }
-  async function openSource(path: string) {
+  async function openSource(path: string, line?: number) {
     setSourcePath(path);
+    setSourceTargetLine(Number.isInteger(line) && Number(line) > 0 ? Number(line) : null);
     setSourceContent("");
     setSourceError("");
     setCopyState(false);
-    setSourceTab("explanation");
+    setSourceTab(line ? "source" : "explanation");
     const request = ++sourceRequest.current;
     const cached = guide.sources.find((s) => s.path === path);
     if (cached) {
@@ -1496,6 +1498,7 @@ export default function Home() {
         onOpenChange={(open) => {
           if (!open) {
             setSourcePath(null);
+            setSourceTargetLine(null);
             sourceRequest.current++;
           }
         }}
@@ -1511,6 +1514,7 @@ export default function Home() {
               {guide.sample
                 ? "Illustrative example source"
                 : `Pinned to commit ${guide.commit.slice(0, 7)}`}
+              {sourceTargetLine ? ` · Definition at line ${sourceTargetLine}` : ""}
             </SheetDescription>
           </SheetHeader>
           <div className="source-mobile-tabs" role="tablist" aria-label="Source notebook view">
@@ -1541,7 +1545,7 @@ export default function Home() {
                 <p className="source-pane-status" role="status"><Loader2 className="spin" size={18} /> Loading source…</p>
               ) : sourceContent ? (
                 <Suspense fallback={<pre className="source-code source-code-fallback"><code>{sourceContent}</code></pre>}>
-                  <SourceCodeViewer path={sourcePath || ""} code={sourceContent} />
+                  <SourceCodeViewer path={sourcePath || ""} code={sourceContent} focusLine={sourceTargetLine} />
                 </Suspense>
               ) : (
                 <p className="source-pane-status">Source is unavailable.</p>

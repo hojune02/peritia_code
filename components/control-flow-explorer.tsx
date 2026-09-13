@@ -1,32 +1,60 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Braces, FileCode2, GitBranch, Info, Loader2, RefreshCw } from "lucide-react";
-import { buildControlFlowMap, type ControlFlowMap, type FlowNode } from "../lib/control-flow";
+import {
+  ArrowRight,
+  Braces,
+  ChevronRight,
+  CornerDownRight,
+  FileCode2,
+  GitBranch,
+  Info,
+  Loader2,
+  RefreshCw,
+  Search,
+} from "lucide-react";
+import { buildControlFlowMap, type ControlFlowMap, type FlowEdge, type FlowNode } from "../lib/control-flow";
 import type { Guide } from "../lib/repository";
 
-function FlowNodeButton({ node, root, onOpen }: { node: FlowNode; root: boolean; onOpen: (path: string) => void }) {
+type OpenDefinition = (path: string, line: number) => void;
+
+function StartNode({ node, onOpen }: { node: FlowNode; onOpen: OpenDefinition }) {
   return (
-    <button className="flow-node" data-root={root || undefined} onClick={() => onOpen(node.path)}>
-      <span className="flow-node-icon"><Braces size={17} /></span>
-      <span className="flow-node-copy">
+    <button
+      className="flow-start-node"
+      onClick={() => onOpen(node.path, node.line)}
+      title={`Open ${node.name} at ${node.path}:${node.line}`}
+    >
+      <span className="flow-step-number">1</span>
+      <span className="flow-start-copy">
+        <small>START HERE</small>
         <strong>{node.name}()</strong>
-        <small>{node.path} · line {node.line}</small>
+        <span>{node.path} · definition at line {node.line}</span>
       </span>
-      <span className="flow-node-uses">{node.incoming} use{node.incoming === 1 ? "" : "s"}</span>
-      <ArrowRight size={15} />
+      <span className="flow-open-definition">Open definition <ArrowRight size={15} /></span>
     </button>
   );
 }
 
-function FlowEndpoint({ node, onOpen }: { node: FlowNode; onOpen: (path: string) => void }) {
+function CallTarget({ edge, node, onOpen }: { edge: FlowEdge; node: FlowNode; onOpen: OpenDefinition }) {
+  const evidence = edge.evidence === "same-file call" ? "Same file" : "Likely cross-file match";
   return (
-    <button className="flow-endpoint" onClick={() => onOpen(node.path)} title={`${node.path}:${node.line}`}>
-      <Braces size={15} />
-      <span><strong>{node.name}()</strong><small>{node.path}:{node.line}</small></span>
+    <button
+      className="flow-call-target"
+      onClick={() => onOpen(node.path, node.line)}
+      title={`Open ${node.name} at ${node.path}:${node.line}`}
+    >
+      <span className="flow-call-origin">Line {edge.callLine}</span>
+      <CornerDownRight size={17} />
+      <span className="flow-target-copy">
+        <strong>{node.name}()</strong>
+        <small>{node.path} · definition at line {node.line}</small>
+      </span>
+      <span className="flow-evidence">{evidence}</span>
+      <ChevronRight size={16} />
     </button>
   );
 }
 
-export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (path: string) => void }) {
+export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: OpenDefinition }) {
   const localMap = useMemo(() => buildControlFlowMap(guide), [guide]);
   const [remote, setRemote] = useState<{
     id: string;
@@ -38,11 +66,13 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
   } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [flowQuery, setFlowQuery] = useState("");
   const map = guide.sample ? localMap : remote?.result;
   const [flowId, setFlowId] = useState("");
 
   useEffect(() => {
     setFlowId("");
+    setFlowQuery("");
     setRemote(null);
     setLoadError("");
     if (guide.sample) return;
@@ -92,6 +122,32 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
   const nodeById = useMemo(() => new Map((map?.nodes ?? []).map((node) => [node.id, node])), [map]);
   const flowNodes = flow?.nodeIds.map((id) => nodeById.get(id)).filter((node): node is FlowNode => Boolean(node)) ?? [];
   const flowEdges = (map?.edges ?? []).filter((edge) => flow?.edgeIds.includes(edge.id));
+  const root = nodeById.get(flow?.rootId ?? "") ?? flowNodes[0];
+  const visibleFlows = (map?.flows ?? []).filter((candidate) => {
+    const candidateRoot = nodeById.get(candidate.rootId);
+    const search = flowQuery.trim().toLowerCase();
+    return !search || candidate.label.toLowerCase().includes(search) || candidateRoot?.path.toLowerCase().includes(search);
+  });
+
+  const callsBySource = new Map<string, FlowEdge[]>();
+  flowEdges.forEach((edge) => callsBySource.set(edge.from, [...(callsBySource.get(edge.from) ?? []), edge]));
+  const callGroups: Array<{ caller: FlowNode; calls: Array<{ edge: FlowEdge; target: FlowNode }> }> = [];
+  const visited = new Set<string>();
+  const queue = root ? [root.id] : [];
+  while (queue.length) {
+    const callerId = queue.shift()!;
+    if (visited.has(callerId)) continue;
+    visited.add(callerId);
+    const caller = nodeById.get(callerId);
+    const calls = (callsBySource.get(callerId) ?? [])
+      .map((edge) => ({ edge, target: nodeById.get(edge.to) }))
+      .filter((call): call is { edge: FlowEdge; target: FlowNode } => Boolean(call.target))
+      .sort((left, right) => left.edge.callLine - right.edge.callLine);
+    if (caller && calls.length) callGroups.push({ caller, calls });
+    calls.forEach(({ target }) => {
+      if (!visited.has(target.id)) queue.push(target.id);
+    });
+  }
 
   if (!guide.sample && (loadError || !map || remote?.status === "queued")) {
     const percent = remote?.filesTotal
@@ -125,65 +181,101 @@ export function ControlFlowExplorer({ guide, onOpen }: { guide: Guide; onOpen: (
 
   return (
     <div className="flow-layout">
-      <aside className="panel flow-list" aria-label="Observed workflows">
-        <span className="mini-label">WORKFLOWS</span>
-        <h2>Follow one path</h2>
-        <p>Start at one observed definition and trace the calls Peritia can resolve.</p>
+      <aside className="panel flow-list" aria-label="Workflow starting points">
+        <span className="mini-label">STARTING FUNCTIONS</span>
+        <h2>Choose where to begin</h2>
+        <p>Select one function to reveal the calls Peritia can connect from it.</p>
+        <label className="flow-search">
+          <Search size={15} />
+          <input
+            value={flowQuery}
+            onChange={(event) => setFlowQuery(event.target.value)}
+            placeholder="Find a function or file"
+            aria-label="Find a workflow starting function"
+          />
+        </label>
         <div className="flow-picker">
-          {map.flows.map((candidate) => {
-            const root = nodeById.get(candidate.rootId);
+          {visibleFlows.map((candidate) => {
+            const candidateRoot = nodeById.get(candidate.rootId);
+            const calls = candidate.edgeIds.length;
             return (
               <button key={candidate.id} aria-pressed={candidate.id === flow?.id} onClick={() => setFlowId(candidate.id)}>
-                <GitBranch size={15} />
-                <span><strong>{candidate.label}()</strong><small>{root?.path}</small></span>
-                <small>{candidate.nodeIds.length}</small>
+                <Braces size={15} />
+                <span><strong>{candidate.label}()</strong><small>{candidateRoot?.path}</small></span>
+                <span className="flow-picker-count">{calls} call{calls === 1 ? "" : "s"}</span>
               </button>
             );
           })}
+          {!visibleFlows.length && <p className="flow-no-results">No functions match “{flowQuery}”.</p>}
         </div>
       </aside>
+
       <section className="panel flow-canvas">
-        <div className="section-heading">
+        <header className="flow-canvas-heading">
           <div>
-            <span className="mini-label">STATIC DEFINITION + CALL INDEX</span>
-            <h2>{flow?.label ?? "Workflow"}()</h2>
+            <span className="mini-label">SELECTED STARTING FUNCTION</span>
+            <h2>{root?.name ?? "Workflow"}()</h2>
+            {root && <p>{root.path} · line {root.line}</p>}
           </div>
-          <span className="method-badge">{flowNodes.length} definitions</span>
-        </div>
-        <div className="flow-disclaimer">
-          <Info size={17} />
-          <p>
-            {remote?.status === "running" ? "Indexing is still in progress. " : ""}
-            This static map covers {map.inspectedFiles} indexed source files out of {map.visibleSourceFiles} supported code files.
-            {map.failedFiles ? ` ${map.failedFiles} files were skipped or could not be indexed.` : ""}
-            It is not a runtime trace; dynamic dispatch, aliases, dependency injection, callbacks, and generated code may be missing.
-          </p>
-        </div>
-        <div className="flow-graph" aria-label={`${flow?.label ?? "Selected"} workflow definitions`}>
-          {flowNodes[0] && <FlowNodeButton node={nodeById.get(flow?.rootId ?? "") ?? flowNodes[0]} root onOpen={onOpen} />}
-          {flowEdges.length ? (
-            <div className="flow-edges" aria-label="Observed call relationships">
-              {flowEdges.map((edge) => {
-                const caller = nodeById.get(edge.from);
-                const callee = nodeById.get(edge.to);
-                if (!caller || !callee) return null;
-                return (
-                  <div className="flow-edge" key={edge.id}>
-                    <FlowEndpoint node={caller} onOpen={onOpen} />
-                    <span className="flow-edge-label"><small>{edge.evidence} · line {edge.callLine}</small><ArrowRight size={17} /></span>
-                    <FlowEndpoint node={callee} onOpen={onOpen} />
+          <div className="flow-metrics" aria-label="Selected workflow size">
+            <span><strong>{flowNodes.length}</strong> functions reached</span>
+            <span><strong>{flowEdges.length}</strong> resolved calls</span>
+          </div>
+        </header>
+
+        <ol className="flow-howto" aria-label="How to use this workflow">
+          <li><span>1</span><div><strong>Start</strong><small>Open the entry function</small></div></li>
+          <li><span>2</span><div><strong>Follow</strong><small>Read its calls in line order</small></div></li>
+          <li><span>3</span><div><strong>Inspect</strong><small>Jump to any definition</small></div></li>
+        </ol>
+
+        <div className="flow-graph" aria-label={`${root?.name ?? "Selected"} workflow calls`}>
+          {root && <StartNode node={root} onOpen={onOpen} />}
+          {callGroups.length ? (
+            <div className="flow-call-groups">
+              {callGroups.map(({ caller, calls }, groupIndex) => (
+                <article className="flow-call-group" key={caller.id}>
+                  <header>
+                    <span className="flow-group-number">{groupIndex + 2}</span>
+                    <span className="flow-group-copy">
+                      <small>CALLS FROM</small>
+                      <strong>{caller.name}()</strong>
+                      <span>{caller.path} · line {caller.line}</span>
+                    </span>
+                    <button onClick={() => onOpen(caller.path, caller.line)}>
+                      Open caller <ArrowRight size={14} />
+                    </button>
+                  </header>
+                  <div className="flow-call-list">
+                    {calls.map(({ edge, target }) => (
+                      <CallTarget key={edge.id} edge={edge} node={target} onOpen={onOpen} />
+                    ))}
                   </div>
-                );
-              })}
+                </article>
+              ))}
             </div>
           ) : (
-            <p className="flow-no-edges">No calls from this definition could be linked unambiguously to another inspected definition.</p>
+            <div className="flow-no-edges">
+              <GitBranch size={20} />
+              <strong>No linked calls from this function</strong>
+              <p>Choose another starting function or open this definition to inspect it directly.</p>
+            </div>
           )}
         </div>
+
         <footer className="flow-foot">
-          <FileCode2 size={15} /> Click any definition to open its source and AI notebook.
-          <span>{map.unresolvedCalls.toLocaleString()} call-like references could not be resolved unambiguously.</span>
+          <span><FileCode2 size={15} /> Function cards open the exact definition line.</span>
+          <span>{map.unresolvedCalls.toLocaleString()} call-like references could not be linked unambiguously.</span>
         </footer>
+        <details className="flow-limitations">
+          <summary><Info size={15} /> How this map is built</summary>
+          <p>
+            {remote?.status === "running" ? "Indexing is still in progress. " : ""}
+            This static map covers {map.inspectedFiles} indexed source files out of {map.visibleSourceFiles} supported code files.{" "}
+            {map.failedFiles ? `${map.failedFiles} files were skipped or could not be indexed. ` : ""}
+            It is not a runtime trace; dynamic dispatch, aliases, dependency injection, callbacks, and generated code may be missing.
+          </p>
+        </details>
       </section>
     </div>
   );

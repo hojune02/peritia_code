@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { detectSourceLanguage } from "../lib/source-language";
 
@@ -16,24 +17,44 @@ const terminalTheme: PrismTheme = {
   ],
 };
 
-export default function SourceCodeViewer({ path, code }: { path: string; code: string }) {
+export default function SourceCodeViewer({ path, code, focusLine }: { path: string; code: string; focusLine?: number | null }) {
   const language = detectSourceLanguage(path);
+  const focusedLineRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!focusLine) return;
+    const frame = requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      focusedLineRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [code, focusLine, path]);
+
   return (
     <Highlight theme={terminalTheme} code={code} language={language.grammar}>
       {({ className, style, tokens, getLineProps, getTokenProps }) => (
         <pre className={`${className} source-code`} style={style}>
           <code>
-            {tokens.map((line, index) => (
-              <span {...getLineProps({ line })} className="code-line" key={index}>
-                <span className="line-number" aria-hidden="true">{index + 1}</span>
-                <span className="code-line-content">
-                  {line.map((token, tokenIndex) => (
-                    <span {...getTokenProps({ token })} key={tokenIndex} />
-                  ))}
-                  {!line.length && " "}
+            {tokens.map((line, index) => {
+              const lineNumber = index + 1;
+              return (
+                <span
+                  {...getLineProps({ line })}
+                  className="code-line"
+                  data-focused={lineNumber === focusLine || undefined}
+                  ref={lineNumber === focusLine ? focusedLineRef : undefined}
+                  key={index}
+                >
+                  <span className="line-number" aria-hidden="true">{lineNumber}</span>
+                  <span className="code-line-content">
+                    {line.map((token, tokenIndex) => (
+                      <span {...getTokenProps({ token })} key={tokenIndex} />
+                    ))}
+                    {!line.length && " "}
+                  </span>
                 </span>
-              </span>
-            ))}
+              );
+            })}
           </code>
         </pre>
       )}

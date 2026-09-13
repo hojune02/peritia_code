@@ -2039,6 +2039,15 @@ h1 {
 .code-line:hover {
   background: rgba(117, 255, 159, 0.045);
 }
+.code-line[data-focused="true"] {
+  scroll-margin-block: 40vh;
+  background: rgba(117, 255, 159, 0.12);
+  box-shadow: inset 3px 0 #8df5af;
+}
+.code-line[data-focused="true"] .line-number {
+  color: #b6f6c9;
+  font-weight: 700;
+}
 .code-line-content {
   min-width: 0;
   white-space: pre-wrap;
