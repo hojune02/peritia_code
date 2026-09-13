@@ -16,6 +16,7 @@ import {
   BookOpen,
   Box,
   Check,
+  ChevronDown,
   ChevronRight,
   Code2,
   Compass,
@@ -65,7 +66,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoGuide } from "@/lib/demo";
 import { AccountControl, useAccount } from "@/components/account";
 import { GoProButton } from "@/components/billing";
@@ -144,6 +144,26 @@ function RepoNavigation({
   onDeleteRepository: (repository: SavedRepository) => void;
 }) {
   const { setOpenMobile } = useSidebar();
+  const [repositoriesOpen, setRepositoriesOpen] = useState(false);
+  const repositoryMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!repositoriesOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!repositoryMenuRef.current?.contains(event.target as Node))
+        setRepositoriesOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRepositoriesOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [repositoriesOpen]);
+
   return (
     <Sidebar className="peritia-sidebar">
       <SidebarHeader className="brand-area">
@@ -170,60 +190,75 @@ function RepoNavigation({
             <Plus size={15} /> Import repository
           </button>
         </div>
-        <div className="saved-repositories" aria-label="Saved repositories">
-          <span className="overline">YOUR REPOSITORIES</span>
-          {repositoriesLoading ? (
-            <p className="saved-repositories-note">Loading repositories…</p>
-          ) : repositories.length ? (
-            <div className="saved-repository-list">
-              {repositories.map((repository) => (
-                <div
-                  key={repository.repositoryId}
-                  className={
-                    !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
-                      && guide.name.toLowerCase() === repository.name.toLowerCase()
-                      ? "saved-repository active"
-                      : "saved-repository"
-                  }
-                  title={`${repository.owner}/${repository.name}`}
-                >
-                  <button
-                    className="saved-repository-open"
-                    onClick={() => {
-                      onRepository(repository);
-                      setOpenMobile(false);
-                    }}
-                    aria-current={
-                      !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
-                        && guide.name.toLowerCase() === repository.name.toLowerCase()
-                        ? "page"
-                        : undefined
-                    }
-                  >
-                    <Github size={14} />
-                    <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
-                    <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
-                      {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
-                    </small>
-                  </button>
-                  <button
-                    className="saved-repository-delete"
-                    onClick={() => onDeleteRepository(repository)}
-                    disabled={deletingRepositoryId === repository.repositoryId}
-                    aria-label={`Delete ${repository.owner}/${repository.name} from your repositories`}
-                    title="Delete saved repository"
-                  >
-                    {deletingRepositoryId === repository.repositoryId
-                      ? <Loader2 size={14} className="spin" />
-                      : <Trash2 size={14} />}
-                  </button>
+        <div className="saved-repositories" aria-label="Saved repositories" ref={repositoryMenuRef}>
+          <button
+            className="saved-repositories-trigger"
+            aria-expanded={repositoriesOpen}
+            aria-controls="saved-repository-menu"
+            data-open={repositoriesOpen || undefined}
+            onClick={() => setRepositoriesOpen((open) => !open)}
+          >
+            <span className="overline">YOUR REPOSITORIES</span>
+            {!!repositories.length && <span className="saved-repository-count">{repositories.length}</span>}
+            <ChevronDown size={15} />
+          </button>
+          {repositoriesOpen && (
+            <div className="saved-repository-menu" id="saved-repository-menu">
+              {repositoriesLoading ? (
+                <p className="saved-repositories-note">Loading repositories…</p>
+              ) : repositories.length ? (
+                <div className="saved-repository-list">
+                  {repositories.map((repository) => (
+                    <div
+                      key={repository.repositoryId}
+                      className={
+                        !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                          && guide.name.toLowerCase() === repository.name.toLowerCase()
+                          ? "saved-repository active"
+                          : "saved-repository"
+                      }
+                      title={`${repository.owner}/${repository.name}`}
+                    >
+                      <button
+                        className="saved-repository-open"
+                        onClick={() => {
+                          onRepository(repository);
+                          setRepositoriesOpen(false);
+                          setOpenMobile(false);
+                        }}
+                        aria-current={
+                          !guide.sample && guide.owner.toLowerCase() === repository.owner.toLowerCase()
+                            && guide.name.toLowerCase() === repository.name.toLowerCase()
+                            ? "page"
+                            : undefined
+                        }
+                      >
+                        <Github size={14} />
+                        <span><strong>{repository.name}</strong><small>{repository.owner}</small></span>
+                        <small title={`${repository.reviewedCount} of ${repository.fileCount} files reviewed`}>
+                          {repository.reviewedCount}/{repository.fileCount.toLocaleString()}
+                        </small>
+                      </button>
+                      <button
+                        className="saved-repository-delete"
+                        onClick={() => onDeleteRepository(repository)}
+                        disabled={deletingRepositoryId === repository.repositoryId}
+                        aria-label={`Delete ${repository.owner}/${repository.name} from your repositories`}
+                        title="Delete saved repository"
+                      >
+                        {deletingRepositoryId === repository.repositoryId
+                          ? <Loader2 size={14} className="spin" />
+                          : <Trash2 size={14} />}
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <p className="saved-repositories-note">
+                  {signedIn ? "Import a repository to save it here." : "Sign in to keep repositories across devices."}
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="saved-repositories-note">
-              {signedIn ? "Import a repository to save it here." : "Sign in to keep repositories across devices."}
-            </p>
           )}
         </div>
         <div className="guide-nav">
@@ -452,7 +487,6 @@ export default function Home() {
   const [error, setError] = useState("");
   const [aboutOpen, setAboutOpen] = useState(false);
   const [tech, setTech] = useState<Tech | null>(null);
-  const [level, setLevel] = useState("beginner");
   const [query, setQuery] = useState("");
   const [sourcePath, setSourcePath] = useState<string | null>(null);
   const [sourceContent, setSourceContent] = useState("");
@@ -770,17 +804,6 @@ export default function Home() {
             <ThemeToggle />
             <GoProButton />
             <AccountControl />
-            {!guide.sample && (
-              <a
-                className="text-action"
-                href={guide.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View on GitHub
-                <ArrowUpRight size={15} />
-              </a>
-            )}
             <button className="export-button" onClick={downloadGuide}>
               <Download size={15} />
               <span>Export guide</span>
@@ -788,31 +811,6 @@ export default function Home() {
           </div>
         </header>
         <main id="main-content" className="document">
-          <div className="import-ribbon">
-            <span>
-              <Github size={17} />
-              <strong>Your next repository, explained.</strong>
-            </span>
-            <form onSubmit={(e) => importRepo(e)}>
-              <input
-                aria-label="Public GitHub repository URL"
-                value={repoInput}
-                onChange={(e) => setRepoInput(e.target.value)}
-                placeholder="https://github.com/owner/repository"
-                disabled={loading}
-              />
-              <button disabled={loading || !repoInput.trim()} type="submit">
-                {loading ? (
-                  <Loader2 size={15} className="spin" />
-                ) : (
-                  <>
-                    Explore
-                    <ArrowRight size={15} />
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
           {repositoryError && <p className="repository-library-error" role="alert">{repositoryError}</p>}
           {guide.sample && (
             <div className="sample-label">
@@ -831,12 +829,6 @@ export default function Home() {
               <h1>{heading[section][0]}</h1>
               <p>{heading[section][1]}</p>
             </div>
-            <Tabs value={level} onValueChange={setLevel} className="level-tabs">
-              <TabsList aria-label="Explanation detail" className="level-list">
-                <TabsTrigger value="beginner">Plain English</TabsTrigger>
-                <TabsTrigger value="technical">Technical</TabsTrigger>
-              </TabsList>
-            </Tabs>
           </div>
           {guide.warnings.length > 0 && (
             <div className="warnings" role="status">
@@ -1118,13 +1110,11 @@ export default function Home() {
                           <ArrowUpRight size={14} />
                         </a>
                       </div>
-                      <p>{level === "beginner" ? t.plain : t.technical}</p>
-                      {level === "beginner" && (
-                        <div className="analogy">
-                          <Sparkles size={15} />
-                          <span>{t.analogy}</span>
-                        </div>
-                      )}
+                      <p>{t.plain}</p>
+                      <div className="analogy">
+                        <Sparkles size={15} />
+                        <span>{t.analogy}</span>
+                      </div>
                       <div className="evidence-row">
                         <span>Detected in</span>
                         {t.evidence.slice(0, 2).map((p) => (
@@ -1469,7 +1459,7 @@ export default function Home() {
                 <DialogDescription>{tech.category}</DialogDescription>
               </DialogHeader>
               <p className="tech-plain">
-                {level === "beginner" ? tech.plain : tech.technical}
+                {tech.plain}
               </p>
               <div className="analogy">
                 <Sparkles size={18} />
@@ -1571,7 +1561,7 @@ export default function Home() {
                     guide={guide}
                     path={sourcePath}
                     content={sourceContent}
-                    level={level}
+                    level="beginner"
                   />
                 )}
                 <span className="mini-label">

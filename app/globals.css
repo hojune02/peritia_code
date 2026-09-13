@@ -274,27 +274,65 @@ code {
   background: #284436;
 }
 .saved-repositories {
-  padding: 22px 12px 18px;
+  position: relative;
+  z-index: 20;
+  padding: 14px 12px;
   border-bottom: 1px solid #2b4136;
-  display: flex;
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 132px;
-  flex-direction: column;
+  flex: 0 0 auto;
 }
-.saved-repositories > .overline {
-  padding: 0 8px;
-  margin-bottom: 11px;
+.saved-repositories-trigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  color: #a0b6a7;
+  text-align: left;
+  border-radius: 8px;
+}
+.saved-repositories-trigger:hover,
+.saved-repositories-trigger[data-open="true"] {
+  color: #eff7e9;
+  background: #284436;
+}
+.saved-repositories-trigger .overline {
+  color: inherit;
+}
+.saved-repositories-trigger > svg {
+  transition: transform 150ms ease;
+}
+.saved-repositories-trigger[data-open="true"] > svg {
+  transform: rotate(180deg);
+}
+.saved-repository-count {
+  color: #91a79a;
+  font-size: 11px;
+}
+.saved-repository-menu {
+  position: absolute;
+  top: calc(100% - 7px);
+  right: 12px;
+  left: 12px;
+  z-index: 30;
+  padding: 5px;
+  background: #142b23;
+  border: 1px solid #2b4136;
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 28%);
 }
 .saved-repository-list {
   display: grid;
   gap: 3px;
   grid-auto-rows: minmax(46px, max-content);
   align-content: start;
-  flex: 1 1 auto;
-  min-height: 0;
+  max-height: min(48vh, 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.saved-repository-list::-webkit-scrollbar {
+  display: none;
 }
 .saved-repository {
   display: grid;

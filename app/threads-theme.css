@@ -456,30 +456,45 @@ summary:focus-visible {
 }
 
 .flow-edge-label {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  min-width: 0;
+  height: 24px;
   white-space: nowrap;
 }
 
 .flow-edge-label::before {
   content: "";
-  grid-column: 1 / -1;
-  grid-row: 1;
+  position: absolute;
+  right: 2px;
+  left: 2px;
+  top: 50%;
   height: 1px;
   background: var(--hairline);
 }
 
 .flow-edge-label > small,
 .flow-edge-label > svg {
+  position: relative;
   z-index: 1;
-  grid-row: 1;
   background: var(--surface-raised);
 }
 
 .flow-edge-label > small {
-  padding-right: 4px;
+  max-width: calc(100% - 18px);
+  padding: 0 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow-edge-label > svg {
+  position: absolute;
+  right: 0;
+  box-sizing: content-box;
+  padding-left: 3px;
+  color: var(--text-secondary);
 }
 
 .flow-no-edges {
@@ -689,8 +704,29 @@ summary:focus-visible {
 }
 
 .saved-repositories {
-  padding-top: 16px;
-  padding-bottom: 14px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.saved-repositories-trigger {
+  color: var(--text-secondary);
+  border-radius: 10px;
+}
+
+.saved-repositories-trigger:hover,
+.saved-repositories-trigger[data-open="true"] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.saved-repository-count {
+  color: var(--text-tertiary);
+}
+
+.saved-repository-menu {
+  background: var(--surface-raised);
+  border-color: var(--hairline);
+  box-shadow: 0 14px 36px color-mix(in srgb, #000 20%, transparent);
 }
 
 .guide-nav {
@@ -730,6 +766,19 @@ summary:focus-visible {
 .saved-repository-delete:hover {
   color: var(--destructive);
   background: var(--surface-active);
+}
+
+/* Retain wheel/touch scrolling without exposing a narrow sidebar rail. */
+.peritia-sidebar,
+.peritia-sidebar *,
+.saved-repository-list {
+  scrollbar-width: none;
+}
+
+.peritia-sidebar::-webkit-scrollbar,
+.peritia-sidebar *::-webkit-scrollbar,
+.saved-repository-list::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar {
@@ -1295,9 +1344,9 @@ h1 {
   }
 
   .flow-edge-label {
-    grid-template-columns: auto auto;
     width: auto;
     margin: 0 auto;
+    gap: 4px;
   }
 
   .flow-edge-label::before {
@@ -1305,6 +1354,8 @@ h1 {
   }
 
   .flow-edge-label > svg {
+    position: static;
+    padding-left: 0;
     transform: rotate(90deg);
   }
 
