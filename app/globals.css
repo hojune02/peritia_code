@@ -289,13 +289,18 @@ code {
 .saved-repository-list {
   display: grid;
   gap: 3px;
+  grid-auto-rows: minmax(46px, max-content);
+  align-content: start;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .saved-repository {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  min-height: 46px;
   width: 100%;
   border-radius: 6px;
   color: #b9cbbf;
